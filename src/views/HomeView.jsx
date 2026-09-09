@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sparkles, Flame, Music2, Play, Plus, Compass, RotateCcw, RefreshCw } from 'lucide-react';
+import { Sparkles, Flame, Music2, Play, Plus, Compass, RotateCcw, ArrowDown, Heart } from 'lucide-react';
 import SongCard from '../components/SongCard';
 import SongRow from '../components/SongRow';
 import SpotifyPlaylistsSection from '../components/SpotifyPlaylistsSection';
@@ -91,87 +91,149 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
     loadHomeData();
   }, []);
 
-  // Fetch or refresh suggestions based on user suggestions, listening history, and liked tracks
+  // ── Suggestion Engine (Vibe Radar-style) ─────────────────────────────────
+  // Same parallel multi-source approach as Vibe Radar:
+  // top artists × 2 mood queries × discovery × trending — all fired in parallel,
+  // round-robin interleaved, Fisher-Yates shuffled.
+  const MOOD_PALETTE = [
+    { mood: 'Chill Vibes',  queries: ['chill relaxing songs',            'lo-fi chill beats'] },
+    { mood: 'High Energy',  queries: ['high energy upbeat songs',         'power workout hits'] },
+    { mood: 'Acoustic',     queries: ['acoustic guitar unplugged songs',  'acoustic cover hits'] },
+    { mood: 'Focus Flow',   queries: ['focus deep work instrumental',     'study playlist calm'] },
+    { mood: 'Party Night',  queries: ['party pop dance songs',            'club banger hits'] },
+    { mood: 'Romantic',     queries: ['romantic love songs hindi',        'romantic english ballads'] },
+    { mood: 'Hip-Hop',      queries: ['hip hop rap hits',                 'trap beats rap'] },
+    { mood: 'Indie',        queries: ['indie alternative songs',          'indie pop hits'] },
+    { mood: 'Bollywood',    queries: ['bollywood top hits',               'latest bollywood songs'] },
+  ];
+
+  // Pull-to-refresh state
+  const [pullProgress, setPullProgress] = useState(0); // 0-100
+  const [isPulling, setIsPulling]       = useState(false);
+  const pullStartY  = useRef(null);
+  const scrollRef   = useRef(null);
+  const PULL_THRESHOLD = 70; // px of drag needed to trigger refresh
+
+  const onTouchStart = useCallback((e) => {
+    if (scrollRef.current?.scrollTop === 0) {
+      pullStartY.current = e.touches[0].clientY;
+    }
+  }, []);
+
+  const onTouchMove = useCallback((e) => {
+    if (pullStartY.current === null) return;
+    const delta = e.touches[0].clientY - pullStartY.current;
+    if (delta > 0) {
+      setPullProgress(Math.min(100, (delta / PULL_THRESHOLD) * 100));
+      setIsPulling(true);
+    }
+  }, []);
+
+  const onTouchEnd = useCallback(() => {
+    if (pullProgress >= 100) {
+      loadSuggestions(true);
+      loadHomeData();
+    }
+    setPullProgress(0);
+    setIsPulling(false);
+    pullStartY.current = null;
+  }, [pullProgress]);
+
+  // Also support mouse drag on desktop (scroll-down gesture)
+  const mouseStartY = useRef(null);
+  const onMouseDown = useCallback((e) => {
+    if (scrollRef.current?.scrollTop === 0) mouseStartY.current = e.clientY;
+  }, []);
+  const onMouseMove = useCallback((e) => {
+    if (mouseStartY.current === null) return;
+    const delta = e.clientY - mouseStartY.current;
+    if (delta > 0) {
+      setPullProgress(Math.min(100, (delta / PULL_THRESHOLD) * 100));
+      setIsPulling(true);
+    }
+  }, []);
+  const onMouseUp = useCallback(() => {
+    if (pullProgress >= 100) {
+      loadSuggestions(true);
+      loadHomeData();
+    }
+    setPullProgress(0);
+    setIsPulling(false);
+    mouseStartY.current = null;
+  }, [pullProgress]);
+
   const loadSuggestions = useCallback(async (forceRefresh = false) => {
     try {
       setSuggestedLoading(true);
-      const availableSeeds = [...(recentSongs || []), ...(likedSongs || [])];
-      
-      let seed = null;
-      if (availableSeeds.length > 0) {
-        if (forceRefresh) {
-          seedIndexRef.current += 1;
+
+      // Advance seed index on every refresh so seeds & moods rotate
+      if (forceRefresh) seedIndexRef.current += 1;
+
+      // Rotating mood — uses current-minute clock like Vibe Radar, but
+      // also advances with seedIndex so manual refresh gives a new mood
+      const moodIndex = (Math.floor(Date.now() / 60000) + seedIndexRef.current) % MOOD_PALETTE.length;
+      const activeMood = MOOD_PALETTE[moodIndex];
+
+      // Collect seeds from recent + liked history (up to 5 unique artists)
+      const allSeeds = [...(recentSongs || []), ...(likedSongs || [])];
+      const artistsSeen = new Set();
+      const topArtists = [];
+      for (const s of allSeeds) {
+        if (!s?.artist) continue;
+        const primary = s.artist.split(/[,&]/)[0].trim();
+        if (primary && !artistsSeen.has(primary)) {
+          artistsSeen.add(primary);
+          topArtists.push(primary);
+          if (topArtists.length >= 5) break;
         }
-        seed = availableSeeds[seedIndexRef.current % availableSeeds.length];
       }
 
-      const likedArtists = Array.from(new Set(
-        (likedSongs || []).map(s => s.artist ? s.artist.split(/[,&]/)[0].trim() : '').filter(Boolean)
-      ));
+      // Build all parallel fetch promises (same pattern as Vibe Radar)
+      const fetchQ = (q) => q
+        ? fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json()).then(d => d.results || []).catch(() => [])
+        : Promise.resolve([]);
 
-      // 1. Query hybrid recommendation engine
-      const recRes = await fetch('/api/recommend', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          seedSong: seed,
-          recentHistory: (recentSongs || []).slice(0, 15),
-          likedArtists: likedArtists.slice(0, 5),
-          limit: 12
-        })
-      });
+      const artistPromises = topArtists.map(a => fetchQ(`${a} songs hits`));
+      const mood1Promise   = fetchQ(activeMood.queries[0]);
+      const mood2Promise   = fetchQ(activeMood.queries[1]);
+      const discoveryP     = fetchQ('new popular music releases');
+      const trendingP      = fetchQ('trending global top hits');
 
-      const recData = await recRes.json();
-      let songs = recData.songs || [];
+      // Fire ALL in parallel
+      const allBuckets = await Promise.all([
+        ...artistPromises, mood1Promise, mood2Promise, discoveryP, trendingP
+      ]);
 
-      // 2. Fallback to auto-playlist if needed
-      if (songs.length < 4) {
-        try {
-          const autoRes = await fetch('/api/auto-playlist', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              recentSongs: (recentSongs || []).slice(0, 10),
-              type: 'vibe-radar',
-              seedSong: seed
-            })
-          });
-          const autoData = await autoRes.json();
-          if (autoData?.songs?.length) {
-            songs = autoData.songs;
+      // Round-robin interleave across all buckets
+      const seen = new Set();
+      const mixed = [];
+      const maxRounds = Math.ceil(20 / Math.max(allBuckets.length, 1));
+      for (let round = 0; round < maxRounds && mixed.length < 20; round++) {
+        for (const bucket of allBuckets) {
+          if (mixed.length >= 20) break;
+          const item = bucket[round];
+          if (item?.id && !seen.has(item.id)) {
+            seen.add(item.id);
+            mixed.push(item);
           }
-        } catch (e) {
-          console.warn('Auto-playlist fallback warning:', e);
         }
       }
 
-      // 3. Fallback to charts if still empty
-      if (songs.length < 4) {
-        const fallbackRes = await fetch('/api/charts');
-        const fallbackData = await fallbackRes.json();
-        const pool = fallbackData.songs || [];
-        songs = pool.slice(0, 12);
+      // Fisher-Yates shuffle
+      for (let i = mixed.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [mixed[i], mixed[j]] = [mixed[j], mixed[i]];
       }
 
-      // Map into playable card objects
-      const finalSongs = songs.map(s => ({
-        ...s,
-        badge: s.badge || 'Suggested'
-      }));
+      setSuggestedSongs(mixed.slice(0, 16));
 
-      setSuggestedSongs(finalSongs);
-
-      // Contextual subtitle
-      if (seed && seed.artist) {
-        const art = seed.artist.split(/[,&]/)[0].trim();
-        setSuggestedSubtitle(`Inspired by ${art}`);
-      } else if (seed && seed.title) {
-        setSuggestedSubtitle(`Because you liked ${seed.title.slice(0, 18)}...`);
-      } else if (recentSongs.length > 0) {
-        setSuggestedSubtitle('Based on your listening');
-      } else {
-        setSuggestedSubtitle('Personalized for you');
-      }
+      // Subtitle: "Artist • Mood & more" or just mood
+      const leadArtist = topArtists[0] || '';
+      setSuggestedSubtitle(
+        leadArtist
+          ? `${leadArtist} · ${activeMood.mood} & more`
+          : `${activeMood.mood} picks for you`
+      );
     } catch (err) {
       console.error('Failed to load suggestions:', err);
     } finally {
@@ -179,25 +241,22 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
     }
   }, [recentSongs, likedSongs]);
 
-  // Automatically update suggestions when user listens to songs or likes new ones
-  const firstRecentId = recentSongs?.[0]?.id;
+  // Auto-refresh whenever the user listens to a new song or likes one
+  const firstRecentId   = recentSongs?.[0]?.id;
   const likedSongsCount = likedSongs?.length || 0;
-
-  useEffect(() => {
-    loadSuggestions(false);
-  }, [firstRecentId, likedSongsCount]);
-
-  const handleManualRefreshSuggestions = () => {
-    loadSuggestions(true);
-  };
-
-  const handleGlobalRefresh = () => {
-    loadSuggestions(true);
-    loadHomeData();
-  };
+  useEffect(() => { loadSuggestions(false); }, [firstRecentId, likedSongsCount]);
 
   return (
-    <div>
+    <div
+      ref={scrollRef}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      style={{ userSelect: 'none' }}
+    >
       {/* Top Header with Profile Option in the Left Top Corner & Refresh Feed on the Right */}
       <header className="top-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         {/* Left Top Corner: Profile Avatar Button */}
@@ -223,7 +282,7 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
             onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.08)'}
             onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
           >
-            {userAvatar || '🎧'}
+            {userAvatar || 'A'}
           </button>
 
           <div>
@@ -241,20 +300,16 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
           </div>
         </div>
 
-        {/* Right Corner: Quick Refresh Feed Button */}
-        <button
-          onClick={handleGlobalRefresh}
-          disabled={loading || suggestedLoading}
-          title="Refresh Feed & Suggestions"
-          className="shelf-action-btn"
-          style={{ padding: '5px 11px' }}
-        >
-          <RefreshCw size={12} className={loading || suggestedLoading ? 'spin' : ''} />
-          <span>Refresh</span>
-        </button>
+        {/* Pull-to-refresh hint shown when user starts dragging */}
+        {isPulling && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.72rem', color: 'var(--accent-rose-light)', opacity: pullProgress / 100 }}>
+            <ArrowDown size={12} style={{ transform: `rotate(${pullProgress * 1.8}deg)`, transition: 'transform 0.1s' }} />
+            <span>{pullProgress >= 100 ? 'Release to refresh' : 'Pull to refresh'}</span>
+          </div>
+        )}
       </header>
 
-      {/* ── Suggested For You Shelf (Refreshes from user suggestions & taste) ── */}
+      {/* ── Suggested For You Shelf ── */}
       <div style={{ marginBottom: '10px' }}>
         <div className="section-header" style={{ marginTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="section-title">
@@ -264,22 +319,11 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span className="section-subtitle" style={{ color: 'var(--accent-rose-light)' }}>
-              {suggestedSubtitle}
+              {suggestedLoading ? 'Refreshing…' : suggestedSubtitle}
             </span>
 
-            {/* Refresh Suggestions Button */}
-            <button
-              onClick={handleManualRefreshSuggestions}
-              disabled={suggestedLoading}
-              title="Refresh suggestions from your taste"
-              className="shelf-action-btn"
-            >
-              <RefreshCw size={11} className={suggestedLoading ? 'spin' : ''} />
-              <span>{suggestedLoading ? 'Refreshing...' : 'Refresh'}</span>
-            </button>
-
-            {/* Play All Button */}
-            {suggestedSongs.length > 0 && (
+            {/* Play All — only button left in the header */}
+            {suggestedSongs.length > 0 && !suggestedLoading && (
               <button
                 onClick={() => playSong(suggestedSongs[0], suggestedSongs)}
                 title="Play all suggested songs"
@@ -366,7 +410,7 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
         <div style={{ marginBottom: '8px' }}>
           <div className="section-header" style={{ marginTop: '8px' }}>
             <div className="section-title">
-              <span style={{ fontSize: '1rem' }}>🎵</span>
+              <Music2 size={17} color="#ff3b68" />
               <span>Your Playlists</span>
             </div>
             {onOpenPlaylist && (
@@ -398,9 +442,8 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
                       <div style={{
                         width: '100%', height: '100%',
                         background: 'linear-gradient(135deg, #9933ff 0%, #ff3b68 100%)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '2.2rem'
-                      }}>❤️</div>
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                      }}><Heart size={28} color="#fff" fill="#ff3b68" /></div>
                     ) : imgs.length >= 4 ? (
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', width: '100%', height: '100%' }}>
                         {imgs.slice(0, 4).map((s, i) => (
@@ -413,8 +456,8 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
                       <div style={{
                         width: '100%', height: '100%',
                         background: 'linear-gradient(135deg, rgba(255,59,104,0.25), rgba(162,56,255,0.25))',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem'
-                      }}>🎵</div>
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                      }}><Music2 size={26} color="rgba(255,59,104,0.7)" /></div>
                     )}
                   </div>
                   <div className="home-playlist-name">{pl.name}</div>

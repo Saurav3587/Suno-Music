@@ -50,7 +50,11 @@ export default function YouTubeEngine({
           onReady: (e) => {
             ytPlayerRef.current = e.target;
             if (currentTrack?.youtubeId) {
-              e.target.loadVideoById(currentTrack.youtubeId);
+              if (isPlaying) {
+                e.target.loadVideoById(currentTrack.youtubeId);
+              } else {
+                e.target.cueVideoById(currentTrack.youtubeId);
+              }
             }
           },
           onStateChange: (e) => {

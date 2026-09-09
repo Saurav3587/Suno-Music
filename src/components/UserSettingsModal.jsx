@@ -23,7 +23,7 @@ import {
 import { useUser } from '../context/UserContext';
 import { useMusic } from '../context/MusicContext';
 
-const AVATARS = ['🎧', '🎸', '🎹', '🎙️', '🎷', '⚡', '🌟', '💿', '🔥', '🎵', '📻', '👑'];
+const AVATARS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
 
 export default function UserSettingsModal({ onClose }) {
   const {
@@ -49,7 +49,7 @@ export default function UserSettingsModal({ onClose }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false); // Settings drawer/view
   const [name, setName] = useState(userName);
   const [bio, setBio] = useState(userBio);
-  const [avatar, setAvatar] = useState(userAvatar || '🎧');
+  const [avatar, setAvatar] = useState(userAvatar || 'A');
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [copiedSuccess, setCopiedSuccess] = useState(false);
 
@@ -419,7 +419,7 @@ export default function UserSettingsModal({ onClose }) {
                     onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
                     title="Click to change avatar"
                   >
-                    {userAvatar || '🎧'}
+                    {userAvatar || 'A'}
                   </div>
 
                   {/* Edit icon badge on avatar */}

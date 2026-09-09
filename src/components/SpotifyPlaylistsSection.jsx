@@ -11,12 +11,12 @@ function SpotifyIcon({ size = 18, color = '#1db954' }) {
 }
 
 const CATEGORY_CHIPS = [
-  { id: 'all', label: '✨ All' },
-  { id: 'india', label: '🇮🇳 India & Desi' },
-  { id: 'charts', label: '🌍 Top Charts' },
-  { id: 'genres', label: '⚡ Rap & Pop' },
-  { id: 'moods', label: '☕ Chill & Focus' },
-  { id: 'decades', label: '🎸 Classics' }
+  { id: 'all',     label: 'All' },
+  { id: 'india',   label: 'India & Desi' },
+  { id: 'charts',  label: 'Top Charts' },
+  { id: 'genres',  label: 'Rap & Pop' },
+  { id: 'moods',   label: 'Chill & Focus' },
+  { id: 'decades', label: 'Classics' }
 ];
 
 export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {

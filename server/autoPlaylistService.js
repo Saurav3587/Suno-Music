@@ -107,121 +107,181 @@ export async function getTrendingSongs(limit = 30) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Mood / Genre palette (rotates to keep the feed fresh on every regenerate)
+// ─────────────────────────────────────────────────────────────────────────────
+const MOOD_PALETTE = [
+  { mood: 'Chill Vibes',   queries: ['chill relaxing songs', 'lo-fi chill beats'] },
+  { mood: 'High Energy',   queries: ['high energy upbeat songs', 'power workout hits'] },
+  { mood: 'Acoustic',      queries: ['acoustic guitar unplugged songs', 'acoustic cover hits'] },
+  { mood: 'Focus Flow',    queries: ['focus deep work instrumental', 'study playlist calm'] },
+  { mood: 'Party Night',   queries: ['party pop dance songs', 'club banger hits'] },
+  { mood: 'Romantic',      queries: ['romantic love songs hindi', 'romantic english ballads'] },
+  { mood: 'Hip-Hop',       queries: ['hip hop rap hits', 'trap beats rap'] },
+  { mood: 'Indie',         queries: ['indie alternative songs', 'indie pop hits'] },
+  { mood: 'Bollywood',     queries: ['bollywood top hits', 'latest bollywood songs'] },
+  { mood: 'Devotional',    queries: ['devotional bhajan songs', 'spiritual songs'] },
+];
+
 /**
- * Generates an Auto-Playlist based on recent listening history and matching artists
+ * Shared dedup + interleave helper.
+ * Pulls up to `perBucket` items from each bucket in round-robin fashion,
+ * then Fisher-Yates shuffles the remainder.
+ */
+function interleaveAndShuffle(buckets, totalLimit = 25, perBucket = 5) {
+  const seen = new Set();
+  const result = [];
+
+  // Round-robin pass: take perBucket from each bucket
+  const maxRounds = Math.ceil(totalLimit / buckets.length);
+  for (let round = 0; round < maxRounds && result.length < totalLimit; round++) {
+    for (const bucket of buckets) {
+      if (result.length >= totalLimit) break;
+      const item = bucket[round];
+      if (item && item.id && !seen.has(item.id)) {
+        seen.add(item.id);
+        result.push(item);
+      }
+    }
+  }
+
+  // Fisher-Yates shuffle to randomise ordering
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+/**
+ * Generates an Auto-Playlist based on recent listening history and matching artists.
+ * All four modes (vibe-radar, radio, acoustics, global) now use parallel fetching
+ * + interleave + Fisher-Yates shuffle for a fresh mixed feed every time.
  */
 export async function generateAutoPlaylist({ recentSongs = [], type = 'vibe-radar', seedSong = null }) {
-  const seenIds = new Set();
-  let results = [];
   let playlistTitle = 'Auto Mix';
   let playlistDescription = 'Generated automatically just for you';
   let gradient = 'linear-gradient(135deg, #ff4b72 0%, #7b2cbf 100%)';
 
-  // 1. Endless Matching Radio for a specific song
-  if (type === 'radio' && seedSong) {
-    playlistTitle = `Radio: Based on ${seedSong.title}`;
-    playlistDescription = `Endless flow of matching tracks inspired by ${seedSong.artist}`;
-    gradient = 'linear-gradient(135deg, #e056fd 0%, #686de0 100%)';
+  // Rotating mood index based on current minute — changes naturally over time
+  const moodIndex = Math.floor(Date.now() / 60000) % MOOD_PALETTE.length;
+  const activeMood = MOOD_PALETTE[moodIndex];
 
-    const artistFirst = seedSong.artist ? seedSong.artist.split(/[,&]/)[0].trim() : '';
-    const query = artistFirst ? `${artistFirst} top songs` : seedSong.title;
-    const matches = await searchSongs(query, 15);
-    matches.forEach(s => {
-      if (s.id !== seedSong.id && !seenIds.has(s.id)) {
-        seenIds.add(s.id);
-        results.push(s);
-      }
-    });
+  // ── 1. VIBE RADAR ────────────────────────────────────────────────────────────
+  if (type === 'vibe-radar') {
+    playlistTitle = `Your Vibe Radar · ${activeMood.mood}`;
+    playlistDescription = `Multi-source mix: your artists + ${activeMood.mood} vibes + trending discoveries`;
+    gradient = 'linear-gradient(135deg, #ff758c 0%, #c471ed 50%, #12c2e9 100%)';
 
-    // Also fetch genre matches
-    const genreMatches = await searchSongs(`${seedSong.language || 'romantic'} love pop songs`, 10);
-    genreMatches.forEach(s => {
-      if (s.id !== seedSong.id && !seenIds.has(s.id)) {
-        seenIds.add(s.id);
-        results.push(s);
-      }
-    });
-  }
-
-  // 2. Vibe Radar: Generated from recently played songs
-  else if (type === 'vibe-radar' || (!seedSong && recentSongs.length > 0)) {
-    playlistTitle = 'Your Vibe Radar';
-    playlistDescription = 'Fresh matching tracks curated from your recent listening history';
-    gradient = 'linear-gradient(135deg, #ff758c 0%, #ff7eb3 100%)';
-
-    // Extract unique recent artists
+    // Extract up to 5 unique primary artists from recent history
     const recentArtists = [];
     recentSongs.forEach(s => {
       if (s.artist) {
         const primary = s.artist.split(/[,&]/)[0].trim();
-        if (primary && !recentArtists.includes(primary)) {
-          recentArtists.push(primary);
-        }
+        if (primary && !recentArtists.includes(primary)) recentArtists.push(primary);
       }
     });
+    const topArtists = recentArtists.slice(0, 5);
 
-    // Take top 3 recent artists and query their latest and matching tracks
-    const selectedArtists = recentArtists.slice(0, 3);
-    for (const artist of selectedArtists) {
-      const artistMatches = await searchSongs(`${artist} hits`, 8);
-      artistMatches.forEach(s => {
-        if (!seenIds.has(s.id)) {
-          seenIds.add(s.id);
-          results.push(s);
-        }
-      });
-    }
+    // Build all queries to fire in parallel
+    const artistQueries = topArtists.map(a => searchSongs(`${a} hits songs`, 8));
+    const mood1 = searchSongs(activeMood.queries[0], 10);
+    const mood2 = searchSongs(activeMood.queries[1] || activeMood.queries[0], 8);
+    const discovery = searchSongs('new music discoveries popular', 8);
+    const trending  = getTrendingSongs(10);
 
-    // Add acoustic / chill match if needed
-    if (results.length < 15) {
-      const chillMatches = await searchSongs('popular acoustic studio hits', 10);
-      chillMatches.forEach(s => {
-        if (!seenIds.has(s.id)) {
-          seenIds.add(s.id);
-          results.push(s);
-        }
-      });
-    }
+    // Fire ALL in parallel — massive speed improvement
+    const allResults = await Promise.all([...artistQueries, mood1, mood2, discovery, trending]);
+
+    // Interleave & shuffle across all buckets
+    const finalSongs = interleaveAndShuffle(allResults, 25, 5);
+
+    return {
+      id: `auto_${type}_${Date.now()}`,
+      type,
+      title: playlistTitle,
+      description: playlistDescription,
+      gradient,
+      songCount: finalSongs.length,
+      generatedAt: new Date().toISOString(),
+      songs: finalSongs
+    };
   }
 
-  // 3. Acoustic Sessions
-  else if (type === 'acoustics') {
-    playlistTitle = 'Acoustic Sessions';
+  // ── 2. ARTIST RADIO ──────────────────────────────────────────────────────────
+  if (type === 'radio' && seedSong) {
+    const artistFirst = seedSong.artist ? seedSong.artist.split(/[,&]/)[0].trim() : '';
+    const language    = seedSong.language || '';
+    playlistTitle       = `Radio: ${artistFirst || seedSong.title}`;
+    playlistDescription = `Endless flow inspired by ${artistFirst} — matching artist, mood & genre`;
+    gradient = 'linear-gradient(135deg, #e056fd 0%, #686de0 100%)';
+
+    // Parallel: artist top songs, artist similar style, language/mood match, mood palette
+    const [artistTop, artistSimilar, langMatch, moodMatch, trendMatch] = await Promise.all([
+      searchSongs(artistFirst ? `${artistFirst} top songs`   : seedSong.title, 10),
+      searchSongs(artistFirst ? `${artistFirst} similar songs` : seedSong.title, 8),
+      searchSongs(language ? `${language} ${activeMood.queries[0]}` : activeMood.queries[0], 8),
+      searchSongs(activeMood.queries[1] || activeMood.queries[0], 6),
+      getTrendingSongs(8),
+    ]);
+
+    // Exclude the seed song itself from all buckets
+    const filterSeed = arr => arr.filter(s => s.id !== seedSong?.id);
+    const finalSongs = interleaveAndShuffle(
+      [filterSeed(artistTop), filterSeed(artistSimilar), filterSeed(langMatch), filterSeed(moodMatch), filterSeed(trendMatch)],
+      25, 5
+    );
+
+    return {
+      id: `auto_${type}_${Date.now()}`,
+      type,
+      title: playlistTitle,
+      description: playlistDescription,
+      gradient,
+      songCount: finalSongs.length,
+      generatedAt: new Date().toISOString(),
+      songs: finalSongs
+    };
+  }
+
+  // ── 3. ACOUSTIC CHILL ────────────────────────────────────────────────────────
+  if (type === 'acoustics') {
+    playlistTitle       = 'Acoustic Sessions';
     playlistDescription = 'Pure, stripped-back studio acoustics and unplugged performances';
     gradient = 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)';
-    const acousticHits = await searchSongs('acoustic guitar unplugged studio songs', 25);
-    acousticHits.forEach(s => {
-      if (!seenIds.has(s.id)) {
-        seenIds.add(s.id);
-        results.push(s);
-      }
-    });
+
+    const [a1, a2, a3, a4] = await Promise.all([
+      searchSongs('acoustic guitar unplugged studio songs', 10),
+      searchSongs('acoustic cover hits popular', 10),
+      searchSongs('soft acoustic folk singer songwriter', 8),
+      searchSongs('unplugged live session intimate', 8),
+    ]);
+
+    const finalSongs = interleaveAndShuffle([a1, a2, a3, a4], 25, 7);
+    return {
+      id: `auto_${type}_${Date.now()}`,
+      type,
+      title: playlistTitle,
+      description: playlistDescription,
+      gradient,
+      songCount: finalSongs.length,
+      generatedAt: new Date().toISOString(),
+      songs: finalSongs
+    };
   }
 
-  // 4. Global Pulse (Chart-toppers & viral hits)
-  else {
-    playlistTitle = 'Global Pulse';
-    playlistDescription = 'The biggest chart-toppers and viral hits streaming right now';
-    gradient = 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)';
-    const trendingHits = await getTrendingSongs(25);
-    trendingHits.forEach(s => {
-      if (!seenIds.has(s.id)) {
-        seenIds.add(s.id);
-        results.push(s);
-      }
-    });
-  }
+  // ── 4. GLOBAL PULSE ──────────────────────────────────────────────────────────
+  playlistTitle       = 'Global Pulse';
+  playlistDescription = 'The biggest chart-toppers and viral hits streaming right now';
+  gradient = 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)';
 
-  // Fallback if empty
-  if (results.length === 0) {
-    results = await getTrendingSongs(20);
-  }
+  const [trending1, trending2, viral] = await Promise.all([
+    getTrendingSongs(15),
+    searchSongs('global top hits viral songs 2024', 10),
+    searchSongs('trending worldwide pop songs', 10),
+  ]);
 
-  // Shuffle results slightly for variety while keeping top matches
-  const topSlice = results.slice(0, 5);
-  const remaining = results.slice(5).sort(() => 0.5 - Math.random());
-  const finalSongs = [...topSlice, ...remaining].slice(0, 25);
-
+  const finalSongs = interleaveAndShuffle([trending1, trending2, viral], 25, 9);
   return {
     id: `auto_${type}_${Date.now()}`,
     type,
@@ -233,3 +293,5 @@ export async function generateAutoPlaylist({ recentSongs = [], type = 'vibe-rada
     songs: finalSongs
   };
 }
+
+

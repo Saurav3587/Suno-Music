@@ -25,11 +25,11 @@ export function UserProvider({ children }) {
   });
 
   const [userBio, setUserBio] = useState(() => {
-    return localStorage.getItem('suno_user_bio') || 'Lost in the rhythm 🎧';
+    return localStorage.getItem('suno_user_bio') || 'Lost in the rhythm';
   });
 
   const [userAvatar, setUserAvatar] = useState(() => {
-    return localStorage.getItem('suno_user_avatar') || '🎧';
+    return localStorage.getItem('suno_user_avatar') || 'A';
   });
 
   // User Custom Playlists: [ { id, name, description, cover, createdAt, songs: [] } ]
@@ -145,8 +145,21 @@ export function UserProvider({ children }) {
       setAuthToken(data.token);
       setCurrentUser(data.user);
 
-      // Trigger automatic sync with guest library
-      syncGuestLibrary(data.token);
+      // Fetch this user's cloud playlists
+      try {
+        const libRes = await fetch('/api/user/library', {
+          headers: { 'Authorization': `Bearer ${data.token}` }
+        });
+        if (libRes.ok) {
+          const libData = await libRes.json();
+          if (Array.isArray(libData.playlists)) {
+            setPlaylists(libData.playlists);
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load user playlists on login:', e);
+      }
+
       return { success: true, user: data.user };
     } catch (e) {
       return { success: false, error: 'Connection error. Please try again.' };
@@ -167,11 +180,27 @@ export function UserProvider({ children }) {
         return { success: false, error: data.error || 'Registration failed.' };
       }
 
+      // Clear legacy guest / previous user local storage items so new account starts 100% clean
+      localStorage.removeItem('suno_recent_history');
+      localStorage.removeItem('suno_recent_songs');
+      localStorage.removeItem('suno_liked_songs');
+
+      // Initialize clean default playlist for new account
+      const defaultPlaylists = [
+        {
+          id: `pl_fav_${Date.now()}`,
+          name: 'My Vibe Playlist',
+          description: 'Handpicked favorites for everyday listening',
+          cover: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80',
+          createdAt: new Date().toLocaleDateString(),
+          songs: []
+        }
+      ];
+      setPlaylists(defaultPlaylists);
+
       setAuthToken(data.token);
       setCurrentUser(data.user);
 
-      // Sync guest playlists and likes into new cloud account
-      syncGuestLibrary(data.token);
       return { success: true, user: data.user };
     } catch (e) {
       return { success: false, error: 'Connection error. Please try again.' };
@@ -183,10 +212,20 @@ export function UserProvider({ children }) {
     setAuthToken(null);
     setCurrentUser(null);
     setUserName('Music Lover');
-    setUserAvatar('🎧');
+    setUserAvatar('A');
+    setUserBio('Lost in the rhythm');
+    setPlaylists([]);
+
+    // Clear session storage and active user cache
+    localStorage.removeItem('suno_auth_token');
+    localStorage.removeItem('suno_current_user');
+    localStorage.removeItem('suno_recent_history');
+    localStorage.removeItem('suno_recent_songs');
+    localStorage.removeItem('suno_liked_songs');
+    localStorage.removeItem('suno_user_playlists');
   };
 
-  // Sync guest library to cloud
+  // Sync guest library to cloud (only called when explicitly needed)
   const syncGuestLibrary = async (token) => {
     const activeToken = token || authToken;
     if (!activeToken) return;

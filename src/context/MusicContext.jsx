@@ -1,43 +1,66 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { useUser } from './UserContext';
 
 const MusicContext = createContext();
 
 export function MusicProvider({ children }) {
+  const { currentUser, authToken } = useUser();
   const audioRef = useRef(new Audio());
   const ytPlayerRef = useRef(null);
   
-  const [currentTrack, setCurrentTrack] = useState(null);
+  const [currentTrack, setCurrentTrack] = useState(() => {
+    try {
+      const saved = localStorage.getItem('suno_last_active_track');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(() => {
+    try {
+      const saved = localStorage.getItem('suno_last_active_progress');
+      return saved ? parseFloat(saved) : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const [duration, setDuration] = useState(() => {
+    try {
+      const saved = localStorage.getItem('suno_last_active_duration');
+      return saved ? parseFloat(saved) : 0;
+    } catch {
+      return 0;
+    }
+  });
   const [volume, setVolume] = useState(1);
   const [isShuffle, setIsShuffle] = useState(false);
   const [repeatMode, setRepeatMode] = useState('off'); // 'off' | 'all' | 'one'
   const [isFullPlayerOpen, setIsFullPlayerOpen] = useState(false);
 
-  // Active playlist queue
-  const [queue, setQueue] = useState([]);
-  const [queueIndex, setQueueIndex] = useState(-1);
-
-  // Recently played history (up to 50 tracks)
-  const [recentSongs, setRecentSongs] = useState(() => {
+  // Active playlist queue (persisted across app restarts)
+  const [queue, setQueue] = useState(() => {
     try {
-      const saved = localStorage.getItem('suno_recent_history');
+      const saved = localStorage.getItem('suno_last_active_queue');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
   });
-
-  // Liked songs
-  const [likedSongs, setLikedSongs] = useState(() => {
+  const [queueIndex, setQueueIndex] = useState(() => {
     try {
-      const saved = localStorage.getItem('suno_liked_songs');
-      return saved ? JSON.parse(saved) : [];
+      const saved = localStorage.getItem('suno_last_active_queue_index');
+      return saved ? parseInt(saved, 10) : -1;
     } catch {
-      return [];
+      return -1;
     }
   });
+
+  // User-scoped recently played history
+  const [recentSongs, setRecentSongs] = useState([]);
+
+  // User-scoped liked songs
+  const [likedSongs, setLikedSongs] = useState([]);
 
   // Autoplay (Endless Smart Flow) toggle
   const [autoplayEnabled, setAutoplayEnabled] = useState(() => {
@@ -49,6 +72,89 @@ export function MusicProvider({ children }) {
   const playedCanonicalTitlesRef = useRef(new Set());
   const accumulatedListenSecondsRef = useRef(0);
   const recordedTrackIdRef = useRef(null);
+  const lastSavedTimeRef = useRef(0);
+
+  // Restore user-scoped state & track when logged-in user changes
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setRecentSongs([]);
+      setLikedSongs([]);
+      setCurrentTrack(null);
+      setQueue([]);
+      setQueueIndex(-1);
+      setCurrentTime(0);
+      return;
+    }
+
+    const userHistoryKey = `suno_recent_history_${currentUser.id}`;
+    const userLikesKey = `suno_liked_songs_${currentUser.id}`;
+    const userTrackKey = `suno_last_track_${currentUser.id}`;
+    const userQueueKey = `suno_last_queue_${currentUser.id}`;
+    const userProgressKey = `suno_last_progress_${currentUser.id}`;
+
+    let cachedHistory = [];
+    let cachedLikes = [];
+    try {
+      const savedH = localStorage.getItem(userHistoryKey);
+      if (savedH) cachedHistory = JSON.parse(savedH);
+    } catch {}
+    try {
+      const savedL = localStorage.getItem(userLikesKey);
+      if (savedL) cachedLikes = JSON.parse(savedL);
+    } catch {}
+
+    setRecentSongs(cachedHistory);
+    setLikedSongs(cachedLikes);
+
+    // Restore THIS user's last playing song in miniplayer.
+    // IMPORTANT: No fallback to the shared global keys — that would bleed
+    // another account's currently-playing track into this account's miniplayer.
+    try {
+      const savedTrack = localStorage.getItem(userTrackKey);
+      if (savedTrack) {
+        const parsedT = JSON.parse(savedTrack);
+        setCurrentTrack(parsedT);
+        if (parsedT?.duration) setDuration(parsedT.duration);
+      } else {
+        // New account or first login — clear any leftover track from previous user
+        setCurrentTrack(null);
+        setQueue([]);
+        setQueueIndex(-1);
+        setCurrentTime(0);
+        setDuration(0);
+        setIsPlaying(false);
+      }
+
+      const savedQ = localStorage.getItem(userQueueKey);
+      if (savedQ) setQueue(JSON.parse(savedQ));
+
+      const savedP = localStorage.getItem(userProgressKey);
+      if (savedP) setCurrentTime(parseFloat(savedP));
+    } catch (e) {
+      console.warn('Failed to restore last active song:', e);
+    }
+
+    // Fetch cloud library from MySQL
+    if (authToken) {
+      fetch('/api/user/library', {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      })
+        .then(res => (res.ok ? res.json() : null))
+        .then(libData => {
+          if (libData) {
+            if (Array.isArray(libData.history)) {
+              setRecentSongs(libData.history);
+              localStorage.setItem(userHistoryKey, JSON.stringify(libData.history));
+            }
+            if (Array.isArray(libData.likedSongs)) {
+              setLikedSongs(libData.likedSongs);
+              localStorage.setItem(userLikesKey, JSON.stringify(libData.likedSongs));
+            }
+          }
+        })
+        .catch(e => console.warn('Failed to load user library from MySQL:', e));
+    }
+  }, [currentUser?.id, authToken]);
 
   // Canonical normalizer to strictly prevent duplicates and repeats
   const getCanonicalTitle = (str) => {
@@ -68,8 +174,24 @@ export function MusicProvider({ children }) {
     const norm = getCanonicalTitle(track.title);
     setRecentSongs(prev => {
       const filtered = prev.filter(s => s.id !== track.id && getCanonicalTitle(s.title) !== norm);
-      return [track, ...filtered].slice(0, 50);
+      const updated = [track, ...filtered].slice(0, 50);
+      if (currentUser?.id) {
+        localStorage.setItem(`suno_recent_history_${currentUser.id}`, JSON.stringify(updated));
+      }
+      return updated;
     });
+
+    // Record listen event in MySQL for this user
+    if (authToken && currentUser?.id) {
+      fetch('/api/user/listen-event', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ song: track, completed: true })
+      }).catch(() => {});
+    }
   };
 
   // 45-Second Listening Threshold: Only add to recent history / Jump Back In after 45s of active listening
@@ -112,10 +234,11 @@ export function MusicProvider({ children }) {
   };
 
   useEffect(() => {
-    const list = JSON.stringify(recentSongs.slice(0, 50));
-    localStorage.setItem('suno_recent_history', list);
-    localStorage.setItem('suno_recent_songs', list);
-  }, [recentSongs]);
+    if (currentUser?.id) {
+      const list = JSON.stringify(recentSongs.slice(0, 50));
+      localStorage.setItem(`suno_recent_history_${currentUser.id}`, list);
+    }
+  }, [recentSongs, currentUser?.id]);
 
   useEffect(() => {
     localStorage.setItem('suno_autoplay_enabled', autoplayEnabled ? 'true' : 'false');
@@ -126,8 +249,47 @@ export function MusicProvider({ children }) {
   };
 
   useEffect(() => {
-    localStorage.setItem('suno_liked_songs', JSON.stringify(likedSongs));
-  }, [likedSongs]);
+    if (currentUser?.id) {
+      localStorage.setItem(`suno_liked_songs_${currentUser.id}`, JSON.stringify(likedSongs));
+    }
+  }, [likedSongs, currentUser?.id]);
+
+  // Persist current track across page reloads and app closes
+  useEffect(() => {
+    if (currentTrack) {
+      const trackJson = JSON.stringify(currentTrack);
+      localStorage.setItem('suno_last_active_track', trackJson);
+      if (currentUser?.id) {
+        localStorage.setItem(`suno_last_track_${currentUser.id}`, trackJson);
+      }
+    }
+  }, [currentTrack, currentUser?.id]);
+
+  // Persist queue and active queue index
+  useEffect(() => {
+    if (queue && queue.length > 0) {
+      const queueJson = JSON.stringify(queue);
+      localStorage.setItem('suno_last_active_queue', queueJson);
+      localStorage.setItem('suno_last_active_queue_index', queueIndex.toString());
+      if (currentUser?.id) {
+        localStorage.setItem(`suno_last_queue_${currentUser.id}`, queueJson);
+      }
+    }
+  }, [queue, queueIndex, currentUser?.id]);
+
+  // Persist playback progress (throttled)
+  useEffect(() => {
+    if (currentTime > 0 && Math.abs(currentTime - lastSavedTimeRef.current) >= 1) {
+      lastSavedTimeRef.current = currentTime;
+      localStorage.setItem('suno_last_active_progress', currentTime.toString());
+      if (currentUser?.id) {
+        localStorage.setItem(`suno_last_progress_${currentUser.id}`, currentTime.toString());
+      }
+    }
+    if (duration > 0) {
+      localStorage.setItem('suno_last_active_duration', duration.toString());
+    }
+  }, [currentTime, duration, currentUser?.id]);
 
   // Audio event listeners for standard audio streams
   useEffect(() => {
@@ -343,79 +505,22 @@ export function MusicProvider({ children }) {
     return Array.from(artists);
   };
 
-  // Prefetch matching tracks in background to maintain continuous YouTube Music / Spotify flow
-  // Enhanced with optional AI session insights for smarter recommendations
+  // Autoplay prefetch: simple direct retrieval by artist
   const prefetchAutoplayTracks = async (seed) => {
     if (!autoplayEnabled || isPrefetchingRef.current || !seed) return;
     isPrefetchingRef.current = true;
 
     try {
-      // 1. Standard Two-Tower recommendation engine (always runs)
-      const res = await fetch('/api/recommend', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          seedSong: seed,
-          recentHistory: recentSongs.slice(0, 25),
-          likedArtists: getLikedArtists(),
-          skippedArtists: skippedArtistsRef.current,
-          mode: 'autoplay',
-          limit: 6
-        })
-      });
-
+      const artist = seed.artist ? seed.artist.split(/[,&]/)[0].trim() : '';
+      const query = artist ? `${artist} songs` : 'popular songs';
+      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
       const data = await res.json();
-      let newSongs = data.songs || [];
+      const songs = data.results || [];
 
-      // 2. Optional AI-enhanced layer: Get LLM session insights for supplementary songs
-      // Only runs every ~3rd prefetch to avoid rate-limiting and keep responses fast
-      if (newSongs.length < 4) {
-        try {
-          const aiRes = await fetch('/api/ai/session-insight', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              currentTrack: seed,
-              recentHistory: recentSongs.slice(0, 10),
-              likedSongs: likedSongs.slice(0, 10)
-            })
-          });
-          const aiData = await aiRes.json();
-
-          // Use AI-suggested search queries to find additional tracks
-          if (aiData.searchQueries && aiData.searchQueries.length > 0) {
-            const aiQuery = aiData.searchQueries[0];
-            const aiSearchRes = await fetch(`/api/search?q=${encodeURIComponent(aiQuery)}`);
-            const aiSearchData = await aiSearchRes.json();
-            const aiSongs = aiSearchData.results || [];
-            if (aiSongs.length > 0) {
-              // Append AI-discovered songs after the primary recommendations
-              newSongs = [...newSongs, ...aiSongs.slice(0, 3)];
-            }
-          }
-        } catch {
-          // AI enhancement is optional — silently continue with standard recommendations
-        }
-      }
-
-      if (newSongs.length > 0) {
+      if (songs.length > 0) {
         setQueue(prevQueue => {
-          const currentCanonical = getCanonicalTitle(seed?.title);
-          const existingCanonical = new Set(prevQueue.map(s => getCanonicalTitle(s.title)).filter(Boolean));
           const existingIds = new Set(prevQueue.map(s => s.id));
-
-          const toAdd = newSongs.filter(s => {
-            if (existingIds.has(s.id)) return false;
-            const norm = getCanonicalTitle(s.title);
-            if (!norm) return false;
-            // Anti-Repeat Guard: Never add the seed song itself, or songs in recent memory window, or songs already in queue
-            if (norm === currentCanonical) return false;
-            if (playedCanonicalTitlesRef.current.has(norm)) return false;
-            if (existingCanonical.has(norm)) return false;
-            existingCanonical.add(norm);
-            return true;
-          });
-
+          const toAdd = songs.filter(s => !existingIds.has(s.id) && s.id !== seed.id).slice(0, 6);
           if (toAdd.length === 0) return prevQueue;
           return [...prevQueue, ...toAdd];
         });
@@ -431,20 +536,47 @@ export function MusicProvider({ children }) {
   const togglePlay = () => {
     if (!currentTrack) return;
 
-    if (currentTrack.source === 'youtube') {
+    if (currentTrack.source === 'youtube' || currentTrack.youtubeId) {
       if (isPlaying) {
         ytPlayerRef.current?.pauseVideo();
         setIsPlaying(false);
       } else {
-        ytPlayerRef.current?.playVideo();
-        setIsPlaying(true);
+        if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === 'function') {
+          ytPlayerRef.current.playVideo();
+          setIsPlaying(true);
+        } else {
+          playSong(currentTrack, queue);
+        }
       }
     } else {
       const audio = audioRef.current;
       if (isPlaying) {
         audio.pause();
+        setIsPlaying(false);
       } else {
-        audio.play().catch(e => console.warn('Play error:', e));
+        const currentSrc = audio.src || '';
+        const needsSetSrc = !currentSrc || currentSrc === window.location.href || currentSrc.endsWith('/');
+        if (needsSetSrc) {
+          if (currentTrack.streamUrl) {
+            audio.src = currentTrack.streamUrl;
+            if (currentTime > 0) audio.currentTime = currentTime;
+            audio.play()
+              .then(() => setIsPlaying(true))
+              .catch(e => {
+                console.warn('Direct stream resume failed, re-resolving:', e);
+                playSong(currentTrack, queue);
+              });
+          } else {
+            playSong(currentTrack, queue);
+          }
+        } else {
+          audio.play()
+            .then(() => setIsPlaying(true))
+            .catch(e => {
+              console.warn('Play error:', e);
+              playSong(currentTrack, queue);
+            });
+        }
       }
     }
   };
@@ -489,43 +621,24 @@ export function MusicProvider({ children }) {
         prefetchAutoplayTracks(queue[nextIndex]);
       }
     } else if (autoplayEnabled && currentTrack) {
-      // Reached end of current queue: Auto-fetch matching songs with hybrid engine
+      // Reached end of current queue: simply fetch more songs by the artist
       try {
-        const res = await fetch('/api/recommend', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            seedSong: currentTrack,
-            recentHistory: recentSongs.slice(0, 25),
-            likedArtists: getLikedArtists(),
-            skippedArtists: skippedArtistsRef.current,
-            mode: 'autoplay',
-            limit: 6
-          })
-        });
+        const artist = currentTrack.artist ? currentTrack.artist.split(/[,&]/)[0].trim() : '';
+        const query = artist ? `${artist} songs` : 'popular songs';
+        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
-        const items = data.songs || [];
-        if (items.length > 0) {
-          const currentCanonical = getCanonicalTitle(currentTrack.title);
-          const existingCanonical = new Set(queue.map(s => getCanonicalTitle(s.title)).filter(Boolean));
-          const newMatching = items.filter(s => {
-            const norm = getCanonicalTitle(s.title);
-            if (!norm) return false;
-            if (norm === currentCanonical) return false;
-            if (playedCanonicalTitlesRef.current.has(norm)) return false;
-            if (existingCanonical.has(norm)) return false;
-            return true;
-          });
+        const items = data.results || [];
+        const existingIds = new Set(queue.map(s => s.id));
+        const newMatching = items.filter(s => !existingIds.has(s.id) && s.id !== currentTrack.id);
 
-          if (newMatching.length > 0) {
-            const combinedQueue = deduplicateQueue([...queue, ...newMatching]);
-            setQueue(combinedQueue);
-            playSong(newMatching[0], combinedQueue);
-            return;
-          }
+        if (newMatching.length > 0) {
+          const combinedQueue = deduplicateQueue([...queue, ...newMatching]);
+          setQueue(combinedQueue);
+          playSong(newMatching[0], combinedQueue);
+          return;
         }
       } catch (err) {
-        console.warn('Autoplay recovery failed:', err);
+        console.warn('Autoplay fetch failed:', err);
       }
 
       if (repeatMode === 'all') {
@@ -578,16 +691,31 @@ export function MusicProvider({ children }) {
     }
   };
 
-  const toggleLike = (song) => {
+  const toggleLike = async (song) => {
     if (!song || !song.id) return;
     setLikedSongs(prev => {
       const exists = prev.some(s => s.id === song.id);
-      if (exists) {
-        return prev.filter(s => s.id !== song.id);
-      } else {
-        return [song, ...prev];
+      const updated = exists ? prev.filter(s => s.id !== song.id) : [song, ...prev];
+      if (currentUser?.id) {
+        localStorage.setItem(`suno_liked_songs_${currentUser.id}`, JSON.stringify(updated));
       }
+      return updated;
     });
+
+    if (authToken && currentUser?.id) {
+      try {
+        await fetch('/api/user/like', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ song })
+        });
+      } catch (e) {
+        console.warn('Like sync to MySQL failed:', e);
+      }
+    }
   };
 
   const isLiked = (songId) => {

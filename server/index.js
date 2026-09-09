@@ -289,32 +289,39 @@ app.post('/api/spotify/import', async (req, res) => {
   }
 });
 
-// Two-Tower Hybrid Recommendations (YouTube Music Flow + Spotify Discovery + Anti-Loop)
+// Simple direct song recommendations (no algorithmic scoring or graphs)
 app.post('/api/recommend', async (req, res) => {
-  const { seedSong, recentHistory = [], likedArtists = [], skippedArtists = [], mode = 'autoplay', limit = 8 } = req.body;
+  const { seedSong, limit = 10 } = req.body;
   try {
-    const songs = await getHybridRecommendations({
-      seedSong,
-      recentHistory,
-      likedArtists,
-      skippedArtists,
-      mode,
-      limit
-    });
+    const artist = seedSong?.artist ? seedSong.artist.split(/[,&]/)[0].trim() : '';
+    let songs = [];
+    if (artist) {
+      const results = await searchSongs(`${artist} songs`, limit);
+      songs = results.filter(s => s.id !== seedSong?.id);
+    }
+    if (songs.length < 4) {
+      const trending = await getTrendingSongs(limit);
+      songs = [...songs, ...trending].slice(0, limit);
+    }
     res.json({ songs });
   } catch (err) {
     console.error('Recommend error:', err.message);
-    res.json({ songs: [] });
+    const fallback = await getTrendingSongs(limit || 10).catch(() => []);
+    res.json({ songs: fallback });
   }
 });
 
 app.get('/api/recommend', async (req, res) => {
-  const { artist, title } = req.query;
+  const { artist, limit = 10 } = req.query;
   try {
-    const songs = await getHybridRecommendations({
-      seedSong: (artist || title) ? { artist: artist || '', title: title || '' } : null,
-      limit: 10
-    });
+    let songs = [];
+    if (artist) {
+      songs = await searchSongs(`${artist} songs`, parseInt(limit, 10) || 10);
+    }
+    if (songs.length < 4) {
+      const trending = await getTrendingSongs(parseInt(limit, 10) || 10);
+      songs = [...songs, ...trending].slice(0, parseInt(limit, 10) || 10);
+    }
     res.json({ songs });
   } catch (err) {
     res.json({ songs: [] });

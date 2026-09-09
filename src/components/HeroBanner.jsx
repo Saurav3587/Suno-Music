@@ -34,7 +34,7 @@ export default function HeroBanner({ onOpenSettings }) {
             }}
             title="Edit Profile"
           >
-            {userAvatar || '🎧'}
+            {userAvatar || 'A'}
           </div>
           <div>
             <div className="dedication-badge" style={{ marginBottom: 0 }}>

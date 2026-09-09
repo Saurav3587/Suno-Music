@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Heart, ListMusic, Clock, Plus, Play, Trash2,
-  ArrowLeft, Music, Shuffle, MoreHorizontal, ChevronRight
+  Heart, Clock, Music2, Plus, Play, Trash2, ChevronLeft,
+  ListMusic, ArrowLeft, Music, Shuffle, MoreHorizontal, ChevronRight
 } from 'lucide-react';
 import SongRow from '../components/SongRow';
 import { useUser } from '../context/UserContext';
@@ -40,7 +40,9 @@ function LikedCover({ songs, size = 'card' }) {
     );
   }
   return (
-    <div className="playlist-liked-cover">❤️</div>
+    <div className="playlist-liked-cover" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Heart size={30} color="#fff" fill="#ff3b68" />
+    </div>
   );
 }
 
@@ -154,7 +156,7 @@ function PlaylistDetail({ playlist, isLiked, onBack, onOpenAddToPlaylist, userNa
             <Music size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
             <p style={{ fontWeight: 600 }}>No songs yet</p>
             <p style={{ fontSize: '0.82rem', marginTop: '6px', color: 'rgba(255,255,255,0.4)' }}>
-              {isLiked ? 'Tap ♥ on any track to save it here.' : 'Search any song and tap + to add it here!'}
+              {isLiked ? 'Tap the heart on any track to save it here.' : 'Search any song and tap + to add it here!'}
             </p>
           </div>
         ) : (
@@ -300,8 +302,8 @@ export default function LibraryView({ onOpenAddToPlaylist, onOpenPlaylistId }) {
         {[
           { id: 'all', label: 'All' },
           { id: 'playlists', label: 'Playlists' },
-          { id: 'liked', label: '❤️ Liked Songs' },
-          { id: 'history', label: '🕐 Recent' },
+          { id: 'liked',   label: 'Liked Songs' },
+          { id: 'history', label: 'Recent' },
         ].map(f => (
           <button
             key={f.id}
@@ -465,8 +467,8 @@ export default function LibraryView({ onOpenAddToPlaylist, onOpenPlaylistId }) {
             <div style={{
               width: '60px', height: '60px', borderRadius: '12px', flexShrink: 0,
               background: 'linear-gradient(135deg, #9933ff 0%, #ff3b68 100%)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem'
-            }}>❤️</div>
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}><Heart size={28} color="#fff" fill="#ff3b68" /></div>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '1rem', color: '#fff', marginBottom: '3px' }}>
                 Liked Songs
@@ -494,7 +496,7 @@ export default function LibraryView({ onOpenAddToPlaylist, onOpenPlaylistId }) {
             <div style={{ textAlign: 'center', padding: '50px 20px', color: 'rgba(255,255,255,0.35)' }}>
               <Heart size={40} style={{ opacity: 0.3, marginBottom: '10px' }} />
               <p style={{ fontWeight: 600 }}>No favorites yet!</p>
-              <p style={{ fontSize: '0.8rem', marginTop: '6px' }}>Tap ♥ on any track to save it here.</p>
+              <p style={{ fontSize: '0.8rem', marginTop: '6px' }}>Tap the heart on any track to save it here.</p>
             </div>
           ) : (
             likedSongs.map((song, i) => (

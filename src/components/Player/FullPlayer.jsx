@@ -215,7 +215,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
         if (data.lyrics) {
           setLyrics(data.lyrics.replace(/<br\s*[\/]?>/gi, '\n'));
         } else {
-          setLyrics('No lyrics found for this song. Enjoy the rhythm! 🎵');
+          setLyrics('No lyrics found for this song. Enjoy the rhythm!');
         }
       } catch {
         setLyrics('Unable to load lyrics at this moment.');
@@ -510,7 +510,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
           }}>
             {aiChatMessages.length === 0 && (
               <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.78rem', textAlign: 'center', padding: '16px 0' }}>
-                Ask me anything! Try "play chill vibes" or "something Punjabi and upbeat" 🎵
+                Ask me anything! Try "play chill vibes" or "something Punjabi and upbeat"
               </div>
             )}
             {aiChatMessages.map((msg, i) => (
@@ -529,7 +529,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
                 {msg.text}
                 {msg.songs && msg.songs.length > 0 && (
                   <div style={{ marginTop: '6px', fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)' }}>
-                    🎵 Playing: {msg.songs[0].title} by {msg.songs[0].artist}
+                    Playing: {msg.songs[0].title} by {msg.songs[0].artist}
                   </div>
                 )}
               </div>

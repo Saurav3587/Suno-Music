@@ -94,7 +94,7 @@ export default function SearchView({ onOpenAddToPlaylist }) {
       <header className="top-header">
         <div>
           <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 700 }}>
-            Search Any Song 🔍
+            Search Any Song
           </h2>
           <span style={{ fontSize: '0.74rem', color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: '4px' }}>
             <span>Studio 320kbps CD Quality Audio</span>
