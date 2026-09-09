@@ -14,8 +14,6 @@ import {
   FileText,
   Sparkles,
   Infinity as InfinityIcon,
-  Send,
-  Bot,
   X
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -69,16 +67,29 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
   const [lyrics, setLyrics] = useState('');
   const [loadingLyrics, setLoadingLyrics] = useState(false);
 
-  // AI DJ State
+  // AI DJ Mood State
   const [aiInsight, setAiInsight] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [showAiChat, setShowAiChat] = useState(false);
   const [aiChatInput, setAiChatInput] = useState('');
-  const [aiChatMessages, setAiChatMessages] = useState([]);
+  const [activeMoodName, setActiveMoodName] = useState('');
+  const [aiDjFeedback, setAiDjFeedback] = useState('');
+  const [aiDjSongsCount, setAiDjSongsCount] = useState(0);
   const [aiChatLoading, setAiChatLoading] = useState(false);
   const [aiAvailable, setAiAvailable] = useState(false);
   const aiInsightTrackRef = useRef(null);
   const chatInputRef = useRef(null);
+
+  const PRESET_MOODS = [
+    { label: 'Romantic', query: 'Romantic' },
+    { label: 'Chill & Relax', query: 'Chill' },
+    { label: 'Party & Dance', query: 'Party' },
+    { label: 'Sad & Melancholy', query: 'Sad' },
+    { label: 'Gym & Energy', query: 'Energetic' },
+    { label: 'Late Night', query: 'Late Night' },
+    { label: 'Focus & Study', query: 'Focus' },
+    { label: 'Nostalgic 90s', query: 'Nostalgic' },
+  ];
 
   // Check AI availability on mount
   useEffect(() => {
@@ -126,36 +137,34 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
     fetchInsight();
   }, [currentTrack?.id, queue]);
 
-  // AI Chat handler
-  const handleAiChat = useCallback(async (e) => {
-    e?.preventDefault();
-    const msg = aiChatInput.trim();
-    if (!msg || aiChatLoading) return;
+  // AI DJ Mood selection handler: plays curated songs immediately based on mood
+  const handleSelectMood = useCallback(async (moodText) => {
+    const targetMood = (typeof moodText === 'string' ? moodText : aiChatInput).trim();
+    if (!targetMood || aiChatLoading) return;
 
-    setAiChatMessages(prev => [...prev, { role: 'user', text: msg }]);
     setAiChatInput('');
     setAiChatLoading(true);
+    setActiveMoodName(targetMood);
 
     try {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, currentTrack })
+        body: JSON.stringify({ message: targetMood, mood: targetMood, currentTrack })
       });
       const data = await res.json();
 
-      setAiChatMessages(prev => [...prev, {
-        role: 'ai',
-        text: data.response || 'Let me find that for you!',
-        songs: data.songs || []
-      }]);
+      setAiDjFeedback(data.response || `Playing songs matching your ${targetMood} mood.`);
+      if (data.mood) setActiveMoodName(data.mood);
 
-      // Auto-play the first result if songs were found
       if (data.songs && data.songs.length > 0) {
+        setAiDjSongsCount(data.songs.length);
         playSong(data.songs[0], data.songs);
+      } else {
+        setAiDjSongsCount(0);
       }
     } catch {
-      setAiChatMessages(prev => [...prev, { role: 'ai', text: 'Oops, something went wrong! Try again 🎵', songs: [] }]);
+      setAiDjFeedback('Could not load songs for this mood. Please try another mood.');
     } finally {
       setAiChatLoading(false);
     }
@@ -450,126 +459,205 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
         </div>
       )}
 
-      {/* AI Chat Overlay */}
+      {/* AI DJ Mood Player Overlay */}
       {showAiChat && (
         <div style={{
           position: 'absolute',
-          bottom: '120px',
-          left: '12px',
-          right: '12px',
-          maxHeight: '280px',
-          background: 'rgba(15, 10, 25, 0.95)',
-          border: '1px solid rgba(162, 56, 255, 0.3)',
+          bottom: '105px',
+          left: '10px',
+          right: '10px',
+          maxHeight: '340px',
+          background: 'rgba(15, 10, 25, 0.96)',
+          border: '1px solid rgba(162, 56, 255, 0.35)',
           borderRadius: '20px',
-          backdropFilter: 'blur(20px)',
+          backdropFilter: 'blur(24px)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
           zIndex: 100,
+          boxShadow: '0 12px 36px rgba(0, 0, 0, 0.65), 0 0 24px rgba(162, 56, 255, 0.2)',
           animation: 'aiChatSlideUp 0.35s cubic-bezier(0.22, 1, 0.36, 1)'
         }}>
-          {/* Chat Header */}
+          {/* Header */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '12px 16px 8px',
-            borderBottom: '1px solid rgba(255,255,255,0.06)'
+            padding: '12px 16px 10px',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
               <div style={{
-                width: '24px',
-                height: '24px',
+                width: '26px',
+                height: '26px',
                 borderRadius: '50%',
                 background: 'linear-gradient(135deg, #a238ff 0%, #ff3b68 100%)',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center'
+                justifyContent: 'center',
+                boxShadow: '0 2px 8px rgba(162, 56, 255, 0.4)'
               }}>
-                <Bot size={13} color="#fff" />
+                <Sparkles size={14} color="#fff" />
               </div>
-              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#d1b8ff', fontFamily: 'var(--font-display)' }}>AI DJ</span>
+              <div>
+                <div style={{ fontSize: '0.84rem', fontWeight: 800, color: '#ffffff', fontFamily: 'var(--font-display)' }}>
+                  AI DJ - Mood Player
+                </div>
+                <div style={{ fontSize: '0.68rem', color: 'rgba(255, 255, 255, 0.55)', fontWeight: 500 }}>
+                  Tell your mood to play matching songs
+                </div>
+              </div>
             </div>
             <button
               onClick={() => setShowAiChat(false)}
-              style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', padding: '4px', display: 'flex' }}
+              title="Close"
+              style={{
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: 'none',
+                borderRadius: '50%',
+                width: '26px',
+                height: '26px',
+                color: 'rgba(255, 255, 255, 0.6)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
             >
-              <X size={18} />
+              <X size={15} />
             </button>
           </div>
 
-          {/* Chat Messages */}
+          {/* Quick Mood Pills */}
+          <div style={{
+            padding: '10px 14px 6px',
+            display: 'flex',
+            gap: '6px',
+            overflowX: 'auto',
+            scrollbarWidth: 'none',
+            flexShrink: 0
+          }}>
+            {PRESET_MOODS.map(m => {
+              const isSelected = activeMoodName && activeMoodName.toLowerCase().includes(m.query.toLowerCase());
+              return (
+                <button
+                  key={m.query}
+                  type="button"
+                  disabled={aiChatLoading}
+                  onClick={() => handleSelectMood(m.query)}
+                  style={{
+                    background: isSelected
+                      ? 'linear-gradient(135deg, #ff3b68, #a238ff)'
+                      : 'rgba(255, 255, 255, 0.08)',
+                    border: isSelected
+                      ? '1px solid rgba(255, 117, 140, 0.6)'
+                      : '1px solid rgba(255, 255, 255, 0.1)',
+                    color: '#ffffff',
+                    padding: '5px 11px',
+                    borderRadius: '100px',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                    cursor: aiChatLoading ? 'default' : 'pointer',
+                    transition: 'all 0.2s ease',
+                    flexShrink: 0
+                  }}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Status & Feedback Area */}
           <div style={{
             flex: 1,
-            overflowY: 'auto',
-            padding: '10px 14px',
+            padding: '8px 14px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '8px',
-            maxHeight: '170px'
+            justifyContent: 'center',
+            minHeight: '65px'
           }}>
-            {aiChatMessages.length === 0 && (
-              <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.78rem', textAlign: 'center', padding: '16px 0' }}>
-                Ask me anything! Try "play chill vibes" or "something Punjabi and upbeat"
+            {aiChatLoading ? (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px 12px',
+                borderRadius: '12px',
+                background: 'rgba(162, 56, 255, 0.12)',
+                border: '1px solid rgba(162, 56, 255, 0.25)',
+                color: '#d1b8ff',
+                fontSize: '0.78rem'
+              }}>
+                <Sparkles size={14} />
+                <span>AI DJ is queuing songs for "{activeMoodName}" mood...</span>
               </div>
-            )}
-            {aiChatMessages.map((msg, i) => (
-              <div key={i} style={{
-                alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                maxWidth: '85%',
-                padding: '8px 14px',
-                borderRadius: msg.role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
-                background: msg.role === 'user'
-                  ? 'linear-gradient(135deg, #ff3b68, #a238ff)'
-                  : 'rgba(255, 255, 255, 0.08)',
-                fontSize: '0.8rem',
-                color: '#ffffff',
+            ) : activeMoodName ? (
+              <div style={{
+                padding: '10px 12px',
+                borderRadius: '12px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.72rem', color: '#ff758c', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Active Mood: {activeMoodName}
+                  </span>
+                  {aiDjSongsCount > 0 && (
+                    <span style={{ fontSize: '0.68rem', color: 'rgba(255, 255, 255, 0.5)' }}>
+                      {aiDjSongsCount} songs playing
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#ffffff', lineHeight: 1.35 }}>
+                  {aiDjFeedback || `Playing songs matching your ${activeMoodName} vibe.`}
+                </div>
+              </div>
+            ) : (
+              <div style={{
+                textAlign: 'center',
+                color: 'rgba(255, 255, 255, 0.45)',
+                fontSize: '0.76rem',
+                padding: '8px 4px',
                 lineHeight: 1.4
               }}>
-                {msg.text}
-                {msg.songs && msg.songs.length > 0 && (
-                  <div style={{ marginTop: '6px', fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)' }}>
-                    Playing: {msg.songs[0].title} by {msg.songs[0].artist}
-                  </div>
-                )}
-              </div>
-            ))}
-            {aiChatLoading && (
-              <div style={{
-                alignSelf: 'flex-start',
-                padding: '8px 14px',
-                borderRadius: '14px 14px 14px 4px',
-                background: 'rgba(255, 255, 255, 0.08)',
-                fontSize: '0.8rem',
-                color: 'rgba(255,255,255,0.5)'
-              }}>
-                <span className="ai-typing-dots">Thinking</span>
+                Pick a mood above or type any feeling below to start listening.
               </div>
             )}
           </div>
 
-          {/* Chat Input */}
-          <form onSubmit={handleAiChat} style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '8px 12px 12px',
-            borderTop: '1px solid rgba(255,255,255,0.06)'
-          }}>
+          {/* Custom Mood Input */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSelectMood(aiChatInput);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 12px 12px',
+              borderTop: '1px solid rgba(255, 255, 255, 0.06)'
+            }}
+          >
             <input
               ref={chatInputRef}
               type="text"
               value={aiChatInput}
               onChange={e => setAiChatInput(e.target.value)}
-              placeholder="Ask the AI DJ..."
+              placeholder="Tell your mood... (e.g. peaceful, broken, romantic)"
               style={{
                 flex: 1,
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
                 borderRadius: '12px',
-                padding: '10px 14px',
+                padding: '9px 12px',
                 color: '#ffffff',
-                fontSize: '0.82rem',
+                fontSize: '0.8rem',
                 outline: 'none',
                 fontFamily: 'var(--font-display)'
               }}
@@ -577,20 +665,22 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
             <button
               type="submit"
               disabled={!aiChatInput.trim() || aiChatLoading}
+              title="Play on Mood"
               style={{
-                width: '38px',
-                height: '38px',
+                width: '36px',
+                height: '36px',
                 borderRadius: '50%',
-                background: aiChatInput.trim() ? 'linear-gradient(135deg, #a238ff 0%, #ff3b68 100%)' : 'rgba(255,255,255,0.08)',
+                background: aiChatInput.trim() ? 'linear-gradient(135deg, #a238ff 0%, #ff3b68 100%)' : 'rgba(255, 255, 255, 0.08)',
                 border: 'none',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: aiChatInput.trim() ? 'pointer' : 'default',
-                transition: 'background 0.2s ease'
+                transition: 'transform 0.15s ease, background 0.2s ease',
+                flexShrink: 0
               }}
             >
-              <Send size={16} color="#ffffff" />
+              <Play size={14} color="#ffffff" fill="#ffffff" />
             </button>
           </form>
         </div>

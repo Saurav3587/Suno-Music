@@ -8,7 +8,7 @@ import { getHybridRecommendations } from './recommendationEngine.js';
 import { deduplicateTrackList } from './dedupService.js';
 import { initDatabase, createUser, getUserByLogin, getUserById, getUserLibrary, syncUserLibrary, toggleLikedSongDb, createPlaylistDb, deletePlaylistDb, addSongToPlaylistDb, recordListenEventDb, getUserTasteProfileDb } from './db.js';
 import { hashPassword, comparePassword, generateToken, requireAuth, optionalAuth } from './auth.js';
-import { analyzeListeningSession, getAIRecommendationReasoning, interpretUserMusicRequest, isAIAvailable } from './llmService.js';
+import { analyzeListeningSession, getAIRecommendationReasoning, interpretUserMusicRequest, interpretMoodRequest, isAIAvailable } from './llmService.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -513,7 +513,7 @@ app.post('/api/ai/session-insight', async (req, res) => {
     res.json(insight);
   } catch (err) {
     console.error('AI session insight error:', err.message);
-    res.json({ mood: 'vibing', insight: 'Enjoying the music ✨', searchQueries: [], suggestedArtists: [] });
+    res.json({ mood: 'vibing', insight: 'Enjoying the music flow.', searchQueries: [], suggestedArtists: [] });
   }
 });
 
@@ -525,41 +525,73 @@ app.post('/api/ai/explain', async (req, res) => {
     res.json({ reasoning });
   } catch (err) {
     console.error('AI explain error:', err.message);
-    res.json({ reasoning: 'This track matches your current vibe 🎵' });
+    res.json({ reasoning: 'This track matches your current vibe.' });
   }
 });
 
-// Handle natural language music requests (e.g., "play chill vibes")
+// Handle mood-based music playback in AI DJ
 app.post('/api/ai/chat', async (req, res) => {
-  const { message, currentTrack } = req.body;
-  if (!message || typeof message !== 'string') {
-    return res.status(400).json({ error: 'Message is required' });
+  const { message, mood, currentTrack } = req.body;
+  const moodInput = (mood || message || '').trim();
+  if (!moodInput) {
+    return res.status(400).json({ error: 'Mood is required' });
   }
+
   try {
-    const interpretation = await interpretUserMusicRequest(message.trim(), currentTrack);
-    
-    // Also search for songs matching the interpreted query
-    let songs = [];
-    try {
-      songs = await searchSongs(interpretation.query, 10);
-    } catch (searchErr) {
-      console.warn('AI chat search failed:', searchErr.message);
+    const interpretation = await interpretMoodRequest(moodInput, currentTrack);
+
+    // Fetch songs for each generated query in parallel
+    const queries = Array.isArray(interpretation.queries) && interpretation.queries.length > 0
+      ? interpretation.queries
+      : [`${moodInput} songs`, `${moodInput} hindi hits`];
+
+    const searchPromises = queries.map(q => searchSongs(q, 8).catch(() => []));
+    const queryResults = await Promise.all(searchPromises);
+
+    // Interleave and deduplicate results
+    const seenIds = new Set();
+    const interleaved = [];
+    const maxLen = Math.max(...queryResults.map(r => r.length), 0);
+
+    for (let round = 0; round < maxLen && interleaved.length < 25; round++) {
+      for (const bucket of queryResults) {
+        if (interleaved.length >= 25) break;
+        const song = bucket[round];
+        if (song && song.id && !seenIds.has(song.id)) {
+          seenIds.add(song.id);
+          interleaved.push(song);
+        }
+      }
     }
-    
+
+    let songs = interleaved;
+    if (songs.length === 0) {
+      songs = await searchSongs(`${moodInput} songs`, 15).catch(() => []);
+    }
+
     res.json({
       response: interpretation.response,
       mood: interpretation.mood,
-      query: interpretation.query,
+      query: moodInput,
       songs
     });
   } catch (err) {
-    console.error('AI chat error:', err.message);
-    // Fallback: just search directly
+    console.error('AI mood DJ error:', err.message);
     try {
-      const songs = await searchSongs(message.trim(), 10);
-      res.json({ response: `Here's what I found for "${message}" 🎵`, mood: 'unknown', query: message, songs });
+      const fallbackSongs = await searchSongs(`${moodInput} songs`, 15);
+      res.json({
+        response: `Playing songs for ${moodInput} mood.`,
+        mood: moodInput,
+        query: moodInput,
+        songs: fallbackSongs
+      });
     } catch {
-      res.json({ response: 'Something went wrong — try again!', mood: 'unknown', query: message, songs: [] });
+      res.json({
+        response: 'Could not fetch songs for this mood. Please try another mood.',
+        mood: moodInput,
+        query: moodInput,
+        songs: []
+      });
     }
   }
 });

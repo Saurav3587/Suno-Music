@@ -9,10 +9,10 @@ let model = null;
 
 if (GEMINI_API_KEY) {
   genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  console.log('Gemini AI initialized (gemini-1.5-flash)');
+  model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash' });
+  console.log('Gemini AI initialized (gemini-3.5-flash)');
 } else {
-  console.warn('⚠️  GEMINI_API_KEY not set — AI DJ features disabled. Get a free key at https://aistudio.google.com/apikey');
+  console.warn('GEMINI_API_KEY not set - AI DJ features disabled. Get a free key at https://aistudio.google.com/apikey');
 }
 
 // =============================================
@@ -20,7 +20,7 @@ if (GEMINI_API_KEY) {
 // =============================================
 const MUSIC_SYSTEM_PROMPT = `You are the AI DJ for "Suno Music", an Indian-focused music streaming app. You have deep expertise in:
 
-🎵 INDIAN MUSIC:
+INDIAN MUSIC:
 - Bollywood (Arijit Singh, Pritam, Vishal Mishra, Shreya Ghoshal, AR Rahman, KK, Mohit Chauhan)
 - Punjabi (Diljit Dosanjh, AP Dhillon, Karan Aujla, Shubh, Sidhu Moose Wala, Guru Randhawa)
 - Indian Indie (Anuv Jain, Prateek Kuhad, The Local Train, When Chai Met Toast, Zaeden)
@@ -28,16 +28,15 @@ const MUSIC_SYSTEM_PROMPT = `You are the AI DJ for "Suno Music", an Indian-focus
 - Desi Hip-Hop (Divine, MC Stan, Seedhe Maut, KR$NA, King, Raftaar)
 - South Indian (Anirudh Ravichander, Sid Sriram, AR Rahman Tamil/Telugu works)
 
-🌍 GLOBAL MUSIC:
+GLOBAL MUSIC:
 - Pop (Ed Sheeran, Taylor Swift, The Weeknd, Charlie Puth, Dua Lipa)
 - R&B, Hip-Hop, Rock, Electronic, K-Pop
 
 PERSONALITY:
-- You're warm, enthusiastic, and speak like a music-loving friend
-- Mix Hindi/English naturally (e.g., "Bhai, this vibe is 🔥")
-- Keep responses SHORT (2-3 sentences max)
-- Use emojis sparingly but effectively
-- Never be generic — always reference specific songs, artists, or moods`;
+- You are warm, enthusiastic, and speak like a music-loving friend
+- Keep responses SHORT (1-2 sentences max)
+- CRITICAL RULE: NEVER use emojis in your responses. Zero emojis allowed.
+- Always reference specific music styles, feelings, or moods naturally`;
 
 
 /**
@@ -131,54 +130,148 @@ Respond with ONLY the explanation text (no JSON, no quotes, no markdown). Keep i
 
 
 /**
- * Interpret a natural language music request into structured search queries
+ * Interpret a user's mood request and generate structured search queries tailored strictly to that mood
  */
-export async function interpretUserMusicRequest(userMessage, currentTrack = null) {
+export async function interpretMoodRequest(userMood, currentTrack = null) {
+  const cleanMood = (userMood || '').trim();
+
+  // Curated mood presets for instant reliable fallback
+  const MOOD_FALLBACKS = {
+    romantic: {
+      mood: 'Romantic',
+      response: 'Setting up a heartfelt romantic playlist for you.',
+      queries: ['Arijit Singh romantic hits', 'bollywood love songs', 'romantic hindi indie acoustic', 'latest romantic hits']
+    },
+    chill: {
+      mood: 'Chill & Relax',
+      response: 'Queuing smooth, relaxed vibes to help you unwind.',
+      queries: ['hindi indie chill songs', 'acoustic chill bollywood', 'prateek kuhad anuv jain', 'lofi hindi chill']
+    },
+    sad: {
+      mood: 'Sad & Melancholic',
+      response: 'Here are deeply emotional, soulful songs for your mood.',
+      queries: ['sad emotional hindi songs', 'Arijit Singh heartbreak songs', 'melancholic acoustic hindi', 'slow sad bollywood']
+    },
+    party: {
+      mood: 'Party & Dance',
+      response: 'Turning up the energy with high-beat party anthems.',
+      queries: ['punjabi party hits', 'bollywood dance party club', 'badshah honey singh party', 'upbeat club hindi hits']
+    },
+    energetic: {
+      mood: 'Energetic & Workout',
+      response: 'Pumping high-tempo beats to keep your adrenaline high.',
+      queries: ['punjabi gym workout songs', 'high energy motivation hindi', 'fast rap hip hop desi', 'hard workout beats']
+    },
+    'late night': {
+      mood: 'Late Night',
+      response: 'Soothing late night melodies for the midnight hours.',
+      queries: ['late night hindi acoustic', 'midnight drives hindi', 'deep hindi indie', 'slowed and reverb hindi']
+    },
+    focus: {
+      mood: 'Focus & Calm',
+      response: 'Calm, steady melodies to help you concentrate.',
+      queries: ['peaceful instrumental acoustic hindi', 'calm focus music', 'ambient acoustic chill', 'soothing study melodies']
+    },
+    nostalgic: {
+      mood: 'Nostalgic 90s & 2000s',
+      response: 'Taking you back in time with timeless golden melodies.',
+      queries: ['90s bollywood golden hits', '2000s hindi nostalgia songs', 'classic bollywood romance', 'mohit chauhan kk golden era']
+    },
+    happy: {
+      mood: 'Happy & Joyful',
+      response: 'Spreading good vibes with uplifting, feel-good music.',
+      queries: ['feel good happy hindi songs', 'cheerful bollywood hits', 'upbeat acoustic pop', 'sunshine happy vibe hindi']
+    },
+    devotional: {
+      mood: 'Peaceful & Devotional',
+      response: 'Peaceful, soul-soothing devotional melodies.',
+      queries: ['peaceful bhajan hindi', 'meditation spiritual melodies', 'soothing flute instrumental', 'divine chants and prayers']
+    }
+  };
+
+  const lower = cleanMood.toLowerCase();
+  let matchedKey = Object.keys(MOOD_FALLBACKS).find(k => lower.includes(k));
+  if (!matchedKey) {
+    if (/love|crush|date|valentine|ishq/i.test(lower)) matchedKey = 'romantic';
+    else if (/relax|calm|peace|unwind|soft|lo-fi|lofi/i.test(lower)) matchedKey = 'chill';
+    else if (/cry|depress|broken|heartbreak|alone|grief|pain|dard|gam/i.test(lower)) matchedKey = 'sad';
+    else if (/club|dance|celebrate|banger|dj|nach/i.test(lower)) matchedKey = 'party';
+    else if (/gym|running|cardio|adrenaline|pump|power|josh/i.test(lower)) matchedKey = 'energetic';
+    else if (/sleep|midnight|night|dark|raat/i.test(lower)) matchedKey = 'late night';
+    else if (/study|work|read|coding/i.test(lower)) matchedKey = 'focus';
+    else if (/old|retro|vintage|90s|2000s|memories|purane/i.test(lower)) matchedKey = 'nostalgic';
+    else if (/joy|cheerful|smile|fun|khush/i.test(lower)) matchedKey = 'happy';
+  }
+
+  const baseFallback = matchedKey
+    ? MOOD_FALLBACKS[matchedKey]
+    : {
+        mood: cleanMood || 'Music Vibe',
+        response: `Playing handpicked songs matching your ${cleanMood || 'selected'} mood.`,
+        queries: [`${cleanMood} songs`, `${cleanMood} hindi hits`, `${cleanMood} playlist`]
+      };
+
   if (!model) {
-    return { query: userMessage, mood: 'unknown', response: "AI DJ is offline — searching directly for your request!" };
+    return baseFallback;
   }
 
   try {
-    const context = currentTrack
-      ? `Currently playing: "${currentTrack.title}" by ${currentTrack.artist}`
-      : 'Nothing playing right now';
+    const prompt = `You are the AI DJ for "Suno Music", an Indian-focused music streaming platform.
+CRITICAL RULE: DO NOT USE ANY EMOJIS UNDER ANY CIRCUMSTANCE.
+
+The user is telling you their MOOD: "${cleanMood}".
+Generate structured search queries to curate a playlist matching this exact mood.
+
+Respond in this EXACT JSON format (no markdown, no backticks, no code blocks):
+{
+  "mood": "Short descriptive title of the mood (e.g. Heartbroken & Melancholic, Upbeat Punjabi Party, Late Night Chill)",
+  "response": "A 1-sentence friendly confirmation acknowledging this mood and stating what music is being queued. Absolutely NO emojis.",
+  "queries": [
+    "search query 1 (artist/style for this mood)",
+    "search query 2 (genre and vibe for this mood)",
+    "search query 3 (popular hits for this mood)",
+    "search query 4 (complementary style for this mood)"
+  ]
+}`;
 
     const result = await model.generateContent({
-      contents: [{
-        role: 'user',
-        parts: [{
-          text: `${MUSIC_SYSTEM_PROMPT}
-
-TASK: The user said: "${userMessage}"
-${context}
-
-Interpret their request and respond in this EXACT JSON format (no markdown, no code blocks):
-{
-  "query": "The best search query to find what they want (specific artist + genre + mood)",
-  "mood": "The mood they're going for",
-  "response": "A short, friendly 1-sentence response acknowledging their request (conversational, use their language)"
-}`
-        }]
-      }],
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.7,
-        maxOutputTokens: 200,
+        maxOutputTokens: 250,
         responseMimeType: 'application/json'
       }
     });
 
     const text = result.response.text();
-    const parsed = JSON.parse(text);
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+
+    // Strip any accidental emojis
+    const cleanResponse = (parsed.response || baseFallback.response).replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F018}-\u{1F0F5}\u{1F200}-\u{1F270}]/gu, '').trim();
 
     return {
-      query: parsed.query || userMessage,
-      mood: parsed.mood || 'unknown',
-      response: parsed.response || `Searching for: ${userMessage}`
+      mood: parsed.mood || baseFallback.mood,
+      response: cleanResponse,
+      queries: Array.isArray(parsed.queries) && parsed.queries.length > 0 ? parsed.queries.slice(0, 4) : baseFallback.queries
     };
   } catch (err) {
-    console.warn('Gemini chat interpretation failed:', err.message);
-    return { query: userMessage, mood: 'unknown', response: `On it! Searching for "${userMessage}" 🎵` };
+    console.warn('Gemini mood interpretation failed:', err.message);
+    return baseFallback;
   }
+}
+
+/**
+ * Interpret a natural language music request into structured search queries
+ */
+export async function interpretUserMusicRequest(userMessage, currentTrack = null) {
+  const moodResult = await interpretMoodRequest(userMessage, currentTrack);
+  return {
+    query: moodResult.queries?.[0] || userMessage,
+    mood: moodResult.mood,
+    response: moodResult.response,
+    queries: moodResult.queries
+  };
 }
 
 
@@ -245,22 +338,22 @@ function getDefaultSessionInsight(currentTrack) {
   // Basic vibe detection without LLM
   const combined = `${title} ${artist}`.toLowerCase();
   let mood = 'vibing';
-  let insight = 'Enjoying the music flow ✨';
+  let insight = 'Enjoying the music flow.';
 
   if (/arijit|atif|vishal mishra|jubin|darshan|mithoon/i.test(combined)) {
     mood = 'romantic';
-    insight = `In a ${artist} romantic zone — keeping the soulful melodies flowing 💫`;
+    insight = `In a ${artist} romantic zone — keeping the soulful melodies flowing.`;
   } else if (/diljit|ap dhillon|karan aujla|shubh|sidhu|badshah|honey/i.test(combined)) {
     mood = 'energetic';
-    insight = `Punjabi energy mode on! Keeping the beats heavy 🔥`;
+    insight = `Punjabi energy mode on, keeping the beats heavy.`;
   } else if (/anuv|prateek|local train|chai met|zaeden/i.test(combined)) {
     mood = 'chill';
-    insight = `Indie acoustic vibes — soft, warm, and dreamy 🌙`;
+    insight = `Indie acoustic vibes — soft, warm, and dreamy.`;
   } else if (/divine|mc stan|seedhe|raftaar|king/i.test(combined)) {
     mood = 'hype';
-    insight = `Desi hip-hop mode — raw bars and heavy drops 🎤`;
+    insight = `Desi hip-hop mode — raw bars and heavy drops.`;
   } else if (artist) {
-    insight = `Vibing with ${artist} — finding more in this lane ✨`;
+    insight = `Vibing with ${artist} — finding more in this lane.`;
   }
 
   return {
@@ -278,10 +371,10 @@ function getDefaultReasoning(currentSong, nextSong) {
   const nextTitle = nextSong?.title || 'this track';
 
   if (curArtist && nextArtist && curArtist.toLowerCase() === nextArtist.toLowerCase()) {
-    return `More from ${curArtist} — keeping the flow going ✨`;
+    return `More from ${curArtist} — keeping the flow going.`;
   }
   if (nextArtist) {
-    return `${nextArtist}'s "${nextTitle}" matches your current vibe perfectly 🎵`;
+    return `${nextArtist}'s "${nextTitle}" matches your current vibe perfectly.`;
   }
-  return `This one fits your current mood — enjoy! 🎶`;
+  return `This one fits your current mood — enjoy.`;
 }
