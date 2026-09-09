@@ -30,11 +30,20 @@ export default function HeroBanner({ onOpenSettings }) {
               justifyContent: 'center',
               fontSize: '1.35rem',
               cursor: 'pointer',
-              boxShadow: '0 4px 12px rgba(255, 59, 104, 0.2)'
+              boxShadow: '0 4px 12px rgba(255, 59, 104, 0.2)',
+              overflow: 'hidden'
             }}
             title="Edit Profile"
           >
-            {userAvatar || 'A'}
+            {userAvatar && (userAvatar.startsWith('data:image/') || userAvatar.startsWith('http://') || userAvatar.startsWith('https://') || userAvatar.startsWith('blob:')) ? (
+              <img
+                src={userAvatar}
+                alt="Profile"
+                style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+              />
+            ) : (
+              userAvatar || (userName ? userName.charAt(0).toUpperCase() : 'A')
+            )}
           </div>
           <div>
             <div className="dedication-badge" style={{ marginBottom: 0 }}>

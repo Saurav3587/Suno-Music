@@ -225,6 +225,45 @@ export function UserProvider({ children }) {
     localStorage.removeItem('suno_user_playlists');
   };
 
+  // Update user profile (local state + cloud sync if authenticated)
+  const updateUserProfile = async ({ name, bio, avatar }) => {
+    if (name !== undefined) setUserName(name);
+    if (bio !== undefined) setUserBio(bio);
+    if (avatar !== undefined) setUserAvatar(avatar);
+
+    if (currentUser) {
+      const updatedUser = {
+        ...currentUser,
+        ...(name !== undefined ? { name } : {}),
+        ...(bio !== undefined ? { bio } : {}),
+        ...(avatar !== undefined ? { avatar } : {})
+      };
+      setCurrentUser(updatedUser);
+      localStorage.setItem('suno_current_user', JSON.stringify(updatedUser));
+    }
+
+    if (authToken) {
+      try {
+        const res = await fetch('/api/user/profile', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ name, bio, avatar })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            setCurrentUser(data.user);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to sync profile to cloud:', err.message);
+      }
+    }
+  };
+
   // Sync guest library to cloud (only called when explicitly needed)
   const syncGuestLibrary = async (token) => {
     const activeToken = token || authToken;
@@ -414,6 +453,7 @@ export function UserProvider({ children }) {
       setUserBio,
       userAvatar,
       setUserAvatar,
+      updateUserProfile,
 
       // Playlist Management
       playlists,

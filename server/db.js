@@ -84,13 +84,20 @@ async function createTables() {
       name VARCHAR(100) NOT NULL,
       phone VARCHAR(20) UNIQUE NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
-      avatar VARCHAR(100) DEFAULT '🎧',
-      bio VARCHAR(255) DEFAULT 'Listening on Suno Music 🎧',
+      avatar MEDIUMTEXT,
+      bio VARCHAR(255) DEFAULT 'Listening on Suno Music',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_phone (phone),
       INDEX idx_user_id (user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
+
+  // Ensure avatar column is MEDIUMTEXT for existing databases
+  try {
+    await pool.query(`ALTER TABLE users MODIFY COLUMN avatar MEDIUMTEXT`);
+  } catch (err) {
+    // Column already modified or not needed
+  }
 
   // 2. Playlists Table
   await pool.query(`
@@ -224,8 +231,8 @@ export async function getUserById(id) {
         user_id: u.user_id,
         name: u.name,
         phone: u.phone,
-        avatar: u.avatar || '🎧',
-        bio: u.bio || 'Listening on Suno Music 🎧',
+        avatar: u.avatar || 'A',
+        bio: u.bio || 'Listening on Suno Music',
         created_at: u.created_at
       };
     }
@@ -236,6 +243,48 @@ export async function getUserById(id) {
   if (!u) return null;
   const { password_hash, ...safe } = u;
   return { ...safe, userId: safe.user_id || safe.userId, user_id: safe.user_id || safe.userId };
+}
+
+/**
+ * Updates user profile (name, bio, avatar)
+ */
+export async function updateUserProfileDb(userId, { name, bio, avatar }) {
+  if (!userId) return null;
+
+  if (isConnected && pool) {
+    const fields = [];
+    const values = [];
+
+    if (name !== undefined) {
+      fields.push('name = ?');
+      values.push(name.trim());
+    }
+    if (bio !== undefined) {
+      fields.push('bio = ?');
+      values.push(bio.trim());
+    }
+    if (avatar !== undefined) {
+      fields.push('avatar = ?');
+      values.push(avatar);
+    }
+
+    if (fields.length > 0) {
+      values.push(userId);
+      await pool.query(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
+    }
+
+    return await getUserById(userId);
+  }
+
+  // Fallback in-memory
+  const u = fallbackStore.users.get(userId);
+  if (u) {
+    if (name !== undefined) u.name = name.trim();
+    if (bio !== undefined) u.bio = bio.trim();
+    if (avatar !== undefined) u.avatar = avatar;
+    fallbackStore.users.set(userId, u);
+  }
+  return await getUserById(userId);
 }
 
 // ==========================================

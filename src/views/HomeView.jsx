@@ -277,12 +277,22 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
               cursor: 'pointer',
               boxShadow: '0 4px 14px rgba(255, 59, 104, 0.25)',
               transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-              flexShrink: 0
+              flexShrink: 0,
+              overflow: 'hidden',
+              padding: 0
             }}
             onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.08)'}
             onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
           >
-            {userAvatar || 'A'}
+            {userAvatar && (userAvatar.startsWith('data:image/') || userAvatar.startsWith('http://') || userAvatar.startsWith('https://') || userAvatar.startsWith('blob:')) ? (
+              <img
+                src={userAvatar}
+                alt="Profile"
+                style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+              />
+            ) : (
+              userAvatar || (userName ? userName.charAt(0).toUpperCase() : 'A')
+            )}
           </button>
 
           <div>

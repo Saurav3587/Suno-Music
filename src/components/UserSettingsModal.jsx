@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   ArrowLeft,
   Settings,
@@ -18,10 +18,14 @@ import {
   User,
   X,
   Volume2,
-  Sliders
+  Sliders,
+  Camera,
+  Upload,
+  Trash2
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 import { useMusic } from '../context/MusicContext';
+import ImageCropModal from './ImageCropModal';
 
 const AVATARS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
 
@@ -33,6 +37,7 @@ export default function UserSettingsModal({ onClose }) {
     setUserBio,
     userAvatar,
     setUserAvatar,
+    updateUserProfile,
     playlists,
     sleepTimerRemaining,
     setSleepTimer,
@@ -53,11 +58,68 @@ export default function UserSettingsModal({ onClose }) {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [copiedSuccess, setCopiedSuccess] = useState(false);
 
-  const handleSaveProfile = (e) => {
+  // Photo Crop State
+  const [cropModalOpen, setCropModalOpen] = useState(false);
+  const [tempImageSrc, setTempImageSrc] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const isImageAvatar = (val) => {
+    return typeof val === 'string' && (val.startsWith('data:image/') || val.startsWith('http://') || val.startsWith('https://') || val.startsWith('blob:'));
+  };
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setTempImageSrc(reader.result);
+        setCropModalOpen(true);
+      };
+      reader.readAsDataURL(file);
+    }
+    e.target.value = '';
+  };
+
+  const handleCropSave = async (croppedDataUrl) => {
+    setAvatar(croppedDataUrl);
+    setCropModalOpen(false);
+    setTempImageSrc(null);
+    if (updateUserProfile) {
+      await updateUserProfile({ avatar: croppedDataUrl });
+    } else {
+      setUserAvatar(croppedDataUrl);
+    }
+    setSavedSuccess(true);
+    setTimeout(() => setSavedSuccess(false), 1200);
+  };
+
+  const handleRemovePhoto = async () => {
+    const fallbackInitial = (name || userName || 'A').charAt(0).toUpperCase();
+    setAvatar(fallbackInitial);
+    if (updateUserProfile) {
+      await updateUserProfile({ avatar: fallbackInitial });
+    } else {
+      setUserAvatar(fallbackInitial);
+    }
+  };
+
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
-    if (name.trim()) setUserName(name.trim());
-    if (bio.trim()) setUserBio(bio.trim());
-    setUserAvatar(avatar);
+    const finalName = name.trim() || userName;
+    const finalBio = bio.trim() || userBio;
+
+    if (updateUserProfile) {
+      await updateUserProfile({
+        name: finalName,
+        bio: finalBio,
+        avatar
+      });
+    } else {
+      setUserName(finalName);
+      setUserBio(finalBio);
+      setUserAvatar(avatar);
+    }
+
     setSavedSuccess(true);
     setTimeout(() => {
       setSavedSuccess(false);
@@ -390,20 +452,20 @@ export default function UserSettingsModal({ onClose }) {
             <div style={{ animation: 'fadeIn 0.2s ease' }}>
               {/* Profile Hero Header */}
               <div style={{ textAlign: 'center', marginBottom: '22px' }}>
-                {/* Large Avatar with Glowing Ring */}
+                {/* Large Avatar with Glowing Ring & Camera Upload Badge */}
                 <div
                   style={{
                     position: 'relative',
-                    width: '92px',
-                    height: '92px',
+                    width: '96px',
+                    height: '96px',
                     margin: '0 auto 14px auto'
                   }}
                 >
                   <div
-                    onClick={() => setIsEditing(!isEditing)}
+                    onClick={() => fileInputRef.current?.click()}
                     style={{
-                      width: '92px',
-                      height: '92px',
+                      width: '96px',
+                      height: '96px',
                       borderRadius: '50%',
                       background: 'linear-gradient(135deg, rgba(255, 59, 104, 0.35), rgba(162, 56, 255, 0.5))',
                       border: '3px solid rgba(255, 117, 140, 0.65)',
@@ -413,37 +475,51 @@ export default function UserSettingsModal({ onClose }) {
                       fontSize: '2.8rem',
                       cursor: 'pointer',
                       boxShadow: '0 8px 28px rgba(255, 59, 104, 0.4)',
-                      transition: 'transform 0.2s ease'
+                      transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                      overflow: 'hidden'
                     }}
                     onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
                     onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-                    title="Click to change avatar"
+                    title="Click to upload profile photo"
                   >
-                    {userAvatar || 'A'}
+                    {isImageAvatar(userAvatar) ? (
+                      <img
+                        src={userAvatar}
+                        alt={userName}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+                      />
+                    ) : (
+                      userAvatar || (userName ? userName.charAt(0).toUpperCase() : 'A')
+                    )}
                   </div>
 
-                  {/* Edit icon badge on avatar */}
-                  <div
-                    onClick={() => setIsEditing(!isEditing)}
+                  {/* Camera icon badge on avatar */}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Upload profile photo"
                     style={{
                       position: 'absolute',
-                      bottom: 0,
-                      right: 0,
-                      width: '28px',
-                      height: '28px',
+                      bottom: '-2px',
+                      right: '-2px',
+                      width: '32px',
+                      height: '32px',
                       borderRadius: '50%',
-                      background: 'var(--gradient-romantic)',
+                      background: 'linear-gradient(135deg, #ff3b68, #a238ff)',
                       color: '#ffffff',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       border: '2px solid #08070d',
                       cursor: 'pointer',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
+                      boxShadow: '0 3px 10px rgba(255, 59, 104, 0.6)',
+                      transition: 'transform 0.15s ease'
                     }}
+                    onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.15)'}
+                    onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                   >
-                    <Edit3 size={13} />
-                  </div>
+                    <Camera size={15} />
+                  </button>
                 </div>
 
                 {/* Display Name */}
@@ -564,30 +640,109 @@ export default function UserSettingsModal({ onClose }) {
                     animation: 'fadeIn 0.2s ease'
                   }}
                 >
-                  <h3 style={{ fontSize: '0.88rem', fontWeight: 800, color: '#ffffff', marginBottom: '12px' }}>
+                  <h3 style={{ fontSize: '0.88rem', fontWeight: 800, color: '#ffffff', marginBottom: '14px' }}>
                     Customize Profile
                   </h3>
 
-                  {/* Avatar Picker */}
+                  {/* Profile Photo Upload & Actions */}
                   <label style={{ fontSize: '0.76rem', color: 'var(--accent-rose-light)', fontWeight: 600, display: 'block', marginBottom: '8px' }}>
-                    Choose Avatar Icon
+                    Profile Photo
                   </label>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                    <div
+                      style={{
+                        width: '46px',
+                        height: '46px',
+                        borderRadius: '50%',
+                        background: 'rgba(255, 255, 255, 0.08)',
+                        border: '2px solid rgba(255, 117, 140, 0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '1.4rem',
+                        overflow: 'hidden',
+                        flexShrink: 0
+                      }}
+                    >
+                      {isImageAvatar(avatar) ? (
+                        <img
+                          src={avatar}
+                          alt="Preview"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        avatar || (name ? name.charAt(0).toUpperCase() : 'A')
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      style={{
+                        padding: '7px 14px',
+                        borderRadius: '100px',
+                        background: 'linear-gradient(135deg, rgba(255, 59, 104, 0.25), rgba(162, 56, 255, 0.35))',
+                        border: '1px solid rgba(255, 117, 140, 0.5)',
+                        color: '#ffffff',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <Upload size={14} />
+                      <span>{isImageAvatar(avatar) ? 'Change Photo' : 'Upload Photo'}</span>
+                    </button>
+
+                    {isImageAvatar(avatar) && (
+                      <button
+                        type="button"
+                        onClick={handleRemovePhoto}
+                        title="Remove custom photo"
+                        style={{
+                          padding: '7px 12px',
+                          borderRadius: '100px',
+                          background: 'rgba(255, 59, 104, 0.12)',
+                          border: '1px solid rgba(255, 59, 104, 0.3)',
+                          color: '#ff85a2',
+                          fontSize: '0.76rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '5px'
+                        }}
+                      >
+                        <Trash2 size={13} />
+                        <span>Remove</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Avatar Letter Picker */}
+                  <label style={{ fontSize: '0.76rem', color: 'rgba(255, 255, 255, 0.65)', fontWeight: 600, display: 'block', marginBottom: '8px' }}>
+                    Or Choose Letter Avatar
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
                     {AVATARS.map((emoji) => (
                       <button
                         key={emoji}
                         type="button"
                         onClick={() => setAvatar(emoji)}
                         style={{
-                          width: '38px',
-                          height: '38px',
+                          width: '36px',
+                          height: '36px',
                           borderRadius: '50%',
-                          fontSize: '1.25rem',
+                          fontSize: '1.05rem',
+                          fontWeight: 700,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           background: avatar === emoji ? 'rgba(255, 59, 104, 0.35)' : 'rgba(255, 255, 255, 0.06)',
                           border: avatar === emoji ? '2px solid #ff3b68' : '1px solid rgba(255, 255, 255, 0.1)',
+                          color: '#ffffff',
                           cursor: 'pointer',
                           transform: avatar === emoji ? 'scale(1.15)' : 'scale(1)',
                           transition: 'all 0.15s ease'
@@ -921,6 +1076,27 @@ export default function UserSettingsModal({ onClose }) {
           )}
         </div>
       </div>
+
+      {/* Hidden File Input for Profile Photo Upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleFileSelect}
+      />
+
+      {/* Interactive Image Crop Modal */}
+      {cropModalOpen && tempImageSrc && (
+        <ImageCropModal
+          imageSrc={tempImageSrc}
+          onClose={() => {
+            setCropModalOpen(false);
+            setTempImageSrc(null);
+          }}
+          onSave={handleCropSave}
+        />
+      )}
     </div>
   );
 }

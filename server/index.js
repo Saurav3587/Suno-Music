@@ -6,7 +6,7 @@ import { normalizeSong, decryptMediaUrl } from './decrypt.js';
 import { getSpotifyCharts, parseSpotifyUrl, getSpotifyEntity, resolveTrackToPlayable, getOfficialPlaylistsList, getSpotifyPlaylistByKeyOrId } from './spotifyService.js';
 import { getHybridRecommendations } from './recommendationEngine.js';
 import { deduplicateTrackList } from './dedupService.js';
-import { initDatabase, createUser, getUserByLogin, getUserById, getUserLibrary, syncUserLibrary, toggleLikedSongDb, createPlaylistDb, deletePlaylistDb, addSongToPlaylistDb, recordListenEventDb, getUserTasteProfileDb } from './db.js';
+import { initDatabase, createUser, getUserByLogin, getUserById, updateUserProfileDb, getUserLibrary, syncUserLibrary, toggleLikedSongDb, createPlaylistDb, deletePlaylistDb, addSongToPlaylistDb, recordListenEventDb, getUserTasteProfileDb } from './db.js';
 import { hashPassword, comparePassword, generateToken, requireAuth, optionalAuth } from './auth.js';
 import { analyzeListeningSession, getAIRecommendationReasoning, interpretUserMusicRequest, interpretMoodRequest, isAIAvailable } from './llmService.js';
 
@@ -14,7 +14,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // In-memory cache for fast responsive responses
 const cache = new Map();
@@ -412,6 +413,21 @@ app.post('/api/auth/login', async (req, res) => {
 // Get current logged-in user profile
 app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
+});
+
+// Update user profile (name, bio, avatar)
+app.put('/api/user/profile', requireAuth, async (req, res) => {
+  const { name, bio, avatar } = req.body;
+  try {
+    const updated = await updateUserProfileDb(req.user.id, { name, bio, avatar });
+    if (!updated) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({ success: true, user: updated });
+  } catch (err) {
+    console.error('Update profile error:', err.message);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
 });
 
 // ==========================================
