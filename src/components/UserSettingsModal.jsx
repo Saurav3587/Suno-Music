@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   ArrowLeft,
-  Settings2,
+  Settings,
   Edit3,
   Check,
   Sparkles,
@@ -200,7 +200,7 @@ export default function UserSettingsModal({ onClose }) {
               transition: 'all 0.2s ease'
             }}
           >
-            {isSettingsOpen ? <X size={18} /> : <Settings2 size={18} />}
+            {isSettingsOpen ? <X size={18} /> : <Settings size={18} />}
           </button>
         </header>
 

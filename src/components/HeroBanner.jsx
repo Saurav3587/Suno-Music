@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Play, Settings2, Music2 } from 'lucide-react';
+import { Sparkles, Play, Settings, Music2 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 import { useMusic } from '../context/MusicContext';
 
@@ -99,7 +99,7 @@ export default function HeroBanner({ onOpenSettings }) {
               transition: 'background 0.2s ease'
             }}
           >
-            <Settings2 size={16} />
+            <Settings size={16} />
           </button>
         </div>
       </div>
