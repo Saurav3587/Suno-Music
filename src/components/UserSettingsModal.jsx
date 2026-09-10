@@ -7,18 +7,13 @@ import {
   Sparkles,
   Clock,
   ShieldCheck,
-  Music2,
   LogOut,
-  Phone,
-  AtSign,
   Heart,
   ListMusic,
   Play,
   Share2,
   User,
   X,
-  Volume2,
-  Sliders,
   Camera,
   Upload,
   Trash2
@@ -42,7 +37,6 @@ export default function UserSettingsModal({ onClose }) {
     sleepTimerRemaining,
     setSleepTimer,
     cancelSleepTimer,
-    isLoggedIn,
     currentUser,
     logout
   } = useUser();

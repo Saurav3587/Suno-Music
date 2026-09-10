@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Sparkles, ChevronRight, Disc3 } from 'lucide-react';
+import { Play, Disc3 } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
 
 function SpotifyIcon({ size = 18, color = '#1db954' }) {

@@ -493,17 +493,6 @@ export function MusicProvider({ children }) {
     }
   };
 
-  // Extract unique liked artists
-  const getLikedArtists = () => {
-    const artists = new Set();
-    likedSongs.forEach(s => {
-      if (s.artist) {
-        const primary = s.artist.split(/[,&]/)[0].trim();
-        if (primary) artists.add(primary);
-      }
-    });
-    return Array.from(artists);
-  };
 
   // Autoplay prefetch: simple direct retrieval by artist
   const prefetchAutoplayTracks = async (seed) => {

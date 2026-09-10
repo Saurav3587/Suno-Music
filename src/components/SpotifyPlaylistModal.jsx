@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Play, Shuffle, Bookmark, Check, Music2, Sparkles, Disc3 } from 'lucide-react';
+import { X, Play, Shuffle, Bookmark, Check, Sparkles, Disc3 } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
 import { useUser } from '../context/UserContext';
 import SongRow from './SongRow';

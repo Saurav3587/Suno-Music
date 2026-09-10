@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ZoomIn, ZoomOut, RotateCw, RefreshCw, Check, X } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCw, Check, X } from 'lucide-react';
 
 /**
  * ImageCropModal

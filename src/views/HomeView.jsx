@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sparkles, Flame, Music2, Play, Plus, Compass, RotateCcw, ArrowDown, Heart } from 'lucide-react';
+import { Sparkles, Flame, Music2, Play, RotateCcw, ArrowDown, Heart } from 'lucide-react';
 import SongCard from '../components/SongCard';
 import SongRow from '../components/SongRow';
 import SpotifyPlaylistsSection from '../components/SpotifyPlaylistsSection';
@@ -69,14 +69,16 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
       setTrendingSongs(chartsData.songs || []);
       setForYouSongs(forYouData.results || []);
 
-      // Map spotify tracks into playable card format
-      const spTracks = (spotifyData.tracks || []).slice(0, 15).map(t => ({
-        id: `sp_${t.spotifyId || t.title}`,
+      // Map spotify / 24h top tracks into playable card format
+      const spTracks = (spotifyData.tracks || []).slice(0, 20).map((t, idx) => ({
+        ...t,
+        id: t.id || `sp_${t.spotifyId || t.title}`,
         title: t.title,
         artist: t.artist,
         duration: t.duration,
-        image: spotifyData.cover || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=500&auto=format&fit=crop&q=80',
-        badge: 'Spotify 320k',
+        image: t.image || spotifyData.cover || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=500&auto=format&fit=crop&q=80',
+        badge: t.badge || (t.rank ? `#${t.rank} Today` : 'Spotify 320k'),
+        rank: t.rank || idx + 1,
         isSpotify: true
       }));
       setSpotifySongs(spTracks);
@@ -482,13 +484,15 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
       {/* Official Spotify Playlists Showcase (24 Verified Flagship Playlists) */}
       <SpotifyPlaylistsSection onSelectPlaylist={setSelectedSpotifyPlaylist} />
 
-      {/* Spotify Today's Top Hits Tracks */}
+      {/* Spotify Today's Top Hits Tracks (24-Hour Most Listened • 6-Hour Cycle) */}
       <div className="section-header" style={{ marginTop: '8px' }}>
         <div className="section-title">
           <SpotifyIcon size={18} />
-          <span>Today's Top Hits • Tracks</span>
+          <span>Today's Top Hits</span>
         </div>
-        <span className="section-subtitle" style={{ color: '#1db954' }}>Official Spotify 320k</span>
+        <span className="section-subtitle" style={{ color: '#1db954', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span>🇮🇳 India Top 50 (24h) • Auto-updates every 6h</span>
+        </span>
       </div>
 
       <div className="horizontal-scroll-row">

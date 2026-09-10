@@ -563,3 +563,64 @@ export async function getUserTasteProfileDb(userId) {
 
   return fallbackStore.tasteProfiles.get(userId) || null;
 }
+
+/**
+ * Retrieves the most listened songs across all users in the last 24 hours.
+ * Ranked strictly by play count descending, then latest listened timestamp.
+ */
+export async function getMostListenedSongs24h(limit = 30) {
+  if (isConnected && pool) {
+    try {
+      const [rows] = await pool.query(
+        `SELECT 
+          song_id, 
+          ANY_VALUE(song_data) AS song_data, 
+          COUNT(*) AS listen_count, 
+          MAX(listened_at) AS last_listened 
+        FROM listen_history 
+        WHERE listened_at >= NOW() - INTERVAL 24 HOUR 
+          AND skipped_early = FALSE 
+        GROUP BY song_id 
+        ORDER BY listen_count DESC, last_listened DESC 
+        LIMIT ?`,
+        [limit]
+      );
+
+      return rows.map((r, idx) => {
+        const data = typeof r.song_data === 'string' ? JSON.parse(r.song_data) : r.song_data;
+        return {
+          ...data,
+          listenCount24h: r.listen_count,
+          rank: idx + 1,
+          badge: `#${idx + 1} Today`
+        };
+      });
+    } catch (err) {
+      console.error('Error fetching 24h most listened songs:', err.message);
+      return [];
+    }
+  }
+
+  // Fallback if running purely in-memory
+  const songCounts = new Map();
+  for (const userSongs of fallbackStore.history.values()) {
+    if (Array.isArray(userSongs)) {
+      for (const s of userSongs) {
+        if (!s || !s.id) continue;
+        const count = songCounts.get(s.id) || { count: 0, song: s };
+        count.count += 1;
+        songCounts.set(s.id, count);
+      }
+    }
+  }
+
+  return Array.from(songCounts.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit)
+    .map((item, idx) => ({
+      ...item.song,
+      listenCount24h: item.count,
+      rank: idx + 1,
+      badge: `#${idx + 1} Today`
+    }));
+}

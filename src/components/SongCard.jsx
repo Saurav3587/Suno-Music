@@ -35,6 +35,25 @@ export default function SongCard({ song, playlist = null }) {
             }
           }}
         />
+        {song.badge && (
+          <div style={{
+            position: 'absolute',
+            top: '6px',
+            left: '6px',
+            background: song.badge.startsWith('#') ? 'linear-gradient(135deg, #ff4b72 0%, #a238ff 100%)' : 'rgba(0, 0, 0, 0.65)',
+            color: '#ffffff',
+            fontSize: '0.66rem',
+            fontWeight: 800,
+            padding: '2px 7px',
+            borderRadius: '100px',
+            backdropFilter: 'blur(6px)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.4)',
+            zIndex: 2,
+            letterSpacing: '0.2px'
+          }}>
+            {song.badge}
+          </div>
+        )}
         <div className="card-play-overlay">
           {isCurrent && isPlaying ? (
             <Pause size={18} fill="#ffffff" strokeWidth={0} />

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Heart, Clock, Music2, Plus, Play, Trash2, ChevronLeft,
-  ListMusic, ArrowLeft, Music, Shuffle, MoreHorizontal, ChevronRight
+  Heart, Plus, Play, Trash2,
+  ArrowLeft, Music, Shuffle
 } from 'lucide-react';
 import SongRow from '../components/SongRow';
 import { useUser } from '../context/UserContext';
@@ -61,8 +61,8 @@ function totalDuration(songs) {
 }
 
 /* ─── Playlist Detail View ─── */
-function PlaylistDetail({ playlist, isLiked, onBack, onOpenAddToPlaylist, userName, onToggleShuffle }) {
-  const { playSong, toggleShuffle, isShuffle } = useMusic();
+function PlaylistDetail({ playlist, isLiked, onBack, onOpenAddToPlaylist, userName }) {
+  const { playSong } = useMusic();
   const { removeSongFromPlaylist } = useUser();
 
   const rawSongs = playlist.songs || [];
@@ -77,9 +77,6 @@ function PlaylistDetail({ playlist, isLiked, onBack, onOpenAddToPlaylist, userNa
     });
   }, [rawSongs]);
 
-  const coverSrc = isLiked
-    ? null
-    : (songs.filter(s => s.image).length >= 4 ? null : (songs[0]?.image || playlist.cover));
 
   const heroBg = songs[0]?.image || playlist.cover;
   const dur = totalDuration(songs);
@@ -201,7 +198,7 @@ function PlaylistDetail({ playlist, isLiked, onBack, onOpenAddToPlaylist, userNa
 
 /* ─── Main LibraryView ─── */
 export default function LibraryView({ onOpenAddToPlaylist, onOpenPlaylistId }) {
-  const { playlists = [], deletePlaylist, createPlaylist, userName, isLoggedIn, openAuthModal } = useUser();
+  const { playlists = [], deletePlaylist, createPlaylist, userName } = useUser();
   const { likedSongs = [], recentSongs = [], playSong } = useMusic();
 
   const [activeFilter, setActiveFilter] = useState('all');
@@ -315,28 +312,6 @@ export default function LibraryView({ onOpenAddToPlaylist, onOpenPlaylistId }) {
         ))}
       </div>
 
-      {/* ── Cloud Sync Banner ── */}
-      {!isLoggedIn && (
-        <div style={{
-          margin: '0 16px 12px 16px',
-          padding: '11px 14px',
-          borderRadius: '14px',
-          background: 'linear-gradient(135deg, rgba(162,56,255,0.12) 0%, rgba(255,75,114,0.12) 100%)',
-          border: '1px solid rgba(162,56,255,0.25)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px'
-        }}>
-          <div>
-            <div style={{ fontSize: '0.80rem', fontWeight: 800, color: '#ffffff' }}>Back Up Your Music</div>
-            <div style={{ fontSize: '0.70rem', color: 'rgba(255,255,255,0.6)' }}>Sync playlists & likes across devices</div>
-          </div>
-          <button onClick={openAuthModal} style={{
-            background: 'linear-gradient(135deg, #ff4b72 0%, #a238ff 100%)',
-            color: '#ffffff', border: 'none', borderRadius: '100px',
-            padding: '6px 14px', fontSize: '0.76rem', fontWeight: 700,
-            cursor: 'pointer', flexShrink: 0, boxShadow: '0 4px 12px rgba(255,75,114,0.3)'
-          }}>Sign In</button>
-        </div>
-      )}
 
       {/* ── Create Playlist Inline Form ── */}
       {isCreating && (

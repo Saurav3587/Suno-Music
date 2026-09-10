@@ -2,13 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import yts from 'yt-search';
 import { searchSongs, getTrendingSongs, getRomanticHits, generateAutoPlaylist } from './autoPlaylistService.js';
-import { normalizeSong, decryptMediaUrl } from './decrypt.js';
+import { normalizeSong } from './decrypt.js';
 import { getSpotifyCharts, parseSpotifyUrl, getSpotifyEntity, resolveTrackToPlayable, getOfficialPlaylistsList, getSpotifyPlaylistByKeyOrId } from './spotifyService.js';
-import { getHybridRecommendations } from './recommendationEngine.js';
 import { deduplicateTrackList } from './dedupService.js';
-import { initDatabase, createUser, getUserByLogin, getUserById, updateUserProfileDb, getUserLibrary, syncUserLibrary, toggleLikedSongDb, createPlaylistDb, deletePlaylistDb, addSongToPlaylistDb, recordListenEventDb, getUserTasteProfileDb } from './db.js';
+import { initDatabase, createUser, getUserByLogin, updateUserProfileDb, getUserLibrary, syncUserLibrary, toggleLikedSongDb, createPlaylistDb, deletePlaylistDb, addSongToPlaylistDb, recordListenEventDb, getMostListenedSongs24h } from './db.js';
 import { hashPassword, comparePassword, generateToken, requireAuth, optionalAuth } from './auth.js';
-import { analyzeListeningSession, getAIRecommendationReasoning, interpretUserMusicRequest, interpretMoodRequest, isAIAvailable } from './llmService.js';
+import { analyzeListeningSession, getAIRecommendationReasoning, interpretMoodRequest, isAIAvailable } from './llmService.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -200,9 +199,104 @@ app.get('/api/spotify/playlists', (req, res) => {
   });
 });
 
+// ============================================================
+// INDIA 24-HOUR MOST LISTENED CHART ENGINE (6-HOUR AUTO-CYCLE)
+// ============================================================
+const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+let todayTopHitsCache = null;
+
+async function refreshTodayTopHitsChart() {
+  try {
+    const now = Date.now();
+    console.log('🇮🇳 [Today Top Hits] Refreshing India Daily Top 50 (Most Listened in India in 24h)...');
+
+    // 1. Fetch official Spotify Daily Top 50 - India (the authoritative daily streaming chart in India)
+    let indiaChart = null;
+    try {
+      indiaChart = await getSpotifyCharts('top-india');
+    } catch (e) {
+      console.warn('⚠️ [Today Top Hits] Could not fetch top-india, falling back to top-hits:', e.message);
+      indiaChart = await getSpotifyCharts('top-hits');
+    }
+
+    const rawTracks = (indiaChart?.tracks || []).slice(0, 30);
+
+    // 2. Resolve each track in parallel to high-definition 500x500 artwork & 320kbps master audio
+    const resolvedTracks = await Promise.all(
+      rawTracks.map(async (t, idx) => {
+        try {
+          const playable = await resolveTrackToPlayable(t);
+          if (playable) {
+            return {
+              ...playable,
+              rank: idx + 1,
+              badge: `#${idx + 1} India`,
+              isSpotify: true
+            };
+          }
+        } catch (e) {}
+
+        return {
+          id: `sp_${t.spotifyId || idx}`,
+          spotifyId: t.spotifyId,
+          title: t.title,
+          artist: t.artist,
+          duration: t.duration,
+          image: indiaChart.cover || 'https://charts-images.scdn.co/assets/locale_en/regional/daily/region_in_default.jpg',
+          album: "Today's Top Hits - India",
+          badge: `#${idx + 1} India`,
+          rank: idx + 1,
+          isSpotify: true
+        };
+      })
+    );
+
+    todayTopHitsCache = {
+      id: '37i9dQZEVXbMWDif5SCqDR',
+      key: 'top-hits',
+      name: "Today's Top Hits",
+      title: "Today's Top Hits",
+      description: "Official Spotify India Daily Top 50: The most listened songs in India in the last 24 hours • Auto-updates every 6 hours",
+      cover: indiaChart.cover || 'https://charts-images.scdn.co/assets/locale_en/regional/daily/region_in_default.jpg',
+      badge: 'India Top Hits',
+      category: 'charts',
+      trackCount: resolvedTracks.length,
+      lastUpdated: now,
+      nextUpdate: now + SIX_HOURS_MS,
+      updateIntervalHours: 6,
+      tracks: resolvedTracks,
+      songs: resolvedTracks
+    };
+
+    console.log(`✅ [Today Top Hits] India Daily Chart refreshed successfully: ${resolvedTracks.length} tracks. Next update in 6h.`);
+    return todayTopHitsCache;
+  } catch (err) {
+    console.error('❌ [Today Top Hits] Error refreshing India 24h chart:', err.message);
+    return todayTopHitsCache;
+  }
+}
+
+// Automatically re-compute chart every 6 hours
+setInterval(refreshTodayTopHitsChart, SIX_HOURS_MS);
+
+// Manual trigger / status endpoint for 24h top hits
+app.post('/api/charts/refresh-top-hits', async (req, res) => {
+  const chart = await refreshTodayTopHitsChart();
+  res.json({ success: true, chart });
+});
+
 // Get single Spotify official playlist with full playable tracklist
 app.get('/api/spotify/playlist/:keyOrId', async (req, res) => {
   const { keyOrId } = req.params;
+
+  // If requesting Today's Top Hits, serve the 24-hour most-listened chart
+  if (keyOrId === 'top-hits') {
+    if (!todayTopHitsCache) {
+      await refreshTodayTopHitsChart();
+    }
+    return res.json(todayTopHitsCache);
+  }
+
   const cacheKey = `spotify_playlist_full_${keyOrId}`;
   const cached = getCache(cacheKey, 600);
   if (cached) return res.json(cached);
@@ -236,9 +330,18 @@ app.get('/api/spotify/playlist/:keyOrId', async (req, res) => {
   }
 });
 
-// Get Spotify Official Charts (Legacy support)
+// Get Spotify Official Charts (Legacy & Live support)
 app.get('/api/spotify/charts', async (req, res) => {
   const type = req.query.type || 'top-hits';
+
+  // Today's Top Hits is backed by the 24-hour most-listened engine
+  if (type === 'top-hits') {
+    if (!todayTopHitsCache) {
+      await refreshTodayTopHitsChart();
+    }
+    return res.json(todayTopHitsCache);
+  }
+
   const cacheKey = `spotify_charts_${type}`;
   const cached = getCache(cacheKey, 600);
   if (cached) return res.json(cached);
@@ -633,6 +736,7 @@ app.get('*', (req, res) => {
 
 // Initialize database before starting server
 initDatabase().then(() => {
+  refreshTodayTopHitsChart();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🎵 Suno Music Server listening on http://localhost:${PORT}`);
   });

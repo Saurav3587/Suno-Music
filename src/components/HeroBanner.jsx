@@ -1,10 +1,10 @@
 import React from 'react';
-import { Sparkles, Play, Settings, Music2 } from 'lucide-react';
+import { Sparkles, Play, Settings } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 import { useMusic } from '../context/MusicContext';
 
 export default function HeroBanner({ onOpenSettings }) {
-  const { userName, userBio, userAvatar, playlists, isLoggedIn, currentUser, openAuthModal } = useUser();
+  const { userName, userBio, userAvatar, playlists, currentUser } = useUser();
   const { recentSongs, likedSongs, playSong } = useMusic();
 
   const handleQuickPlay = () => {
@@ -54,43 +54,21 @@ export default function HeroBanner({ onOpenSettings }) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {!isLoggedIn ? (
-            <button
-              onClick={openAuthModal}
-              style={{
-                background: 'linear-gradient(135deg, #ff4b72 0%, #a238ff 100%)',
-                color: '#ffffff',
-                border: 'none',
-                padding: '6px 14px',
-                borderRadius: '100px',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                boxShadow: '0 4px 12px rgba(255, 75, 114, 0.3)'
-              }}
-            >
-              <span>Sign In</span>
-            </button>
-          ) : (
-            <div
-              onClick={onOpenSettings}
-              style={{
-                fontSize: '0.74rem',
-                fontWeight: 700,
-                color: '#1db954',
-                background: 'rgba(29, 185, 84, 0.15)',
-                border: '1px solid rgba(29, 185, 84, 0.3)',
-                padding: '4px 10px',
-                borderRadius: '100px',
-                cursor: 'pointer'
-              }}
-            >
-              @{currentUser?.userId || 'user'}
-            </div>
-          )}
+          <div
+            onClick={onOpenSettings}
+            style={{
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              color: '#1db954',
+              background: 'rgba(29, 185, 84, 0.15)',
+              border: '1px solid rgba(29, 185, 84, 0.3)',
+              padding: '4px 10px',
+              borderRadius: '100px',
+              cursor: 'pointer'
+            }}
+          >
+            @{currentUser?.userId || 'user'}
+          </div>
 
           <button
             onClick={onOpenSettings}

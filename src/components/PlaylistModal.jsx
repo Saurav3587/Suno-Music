@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plus, Check, ListMusic, Music } from 'lucide-react';
+import { X, Plus, Check, ListMusic } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 
 export default function PlaylistModal({ song, onClose }) {

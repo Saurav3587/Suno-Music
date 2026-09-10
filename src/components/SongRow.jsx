@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, Plus, Play, Pause } from 'lucide-react';
+import { Heart, Plus } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
 
 export default function SongRow({ song, index, playlist = null, onAddToPlaylist = null, onOpenNote = null }) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Music, Sparkles, Flame, Disc } from 'lucide-react';
+import { Search, X, Music, Sparkles, Flame } from 'lucide-react';
 import SongRow from '../components/SongRow';
 import SpotifyPlaylistsSection from '../components/SpotifyPlaylistsSection';
 import SpotifyPlaylistModal from '../components/SpotifyPlaylistModal';

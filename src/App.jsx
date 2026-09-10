@@ -5,7 +5,6 @@ import FullPlayer from './components/Player/FullPlayer';
 import YouTubeEngine from './components/Player/YouTubeEngine';
 import PlaylistModal from './components/PlaylistModal';
 import UserSettingsModal from './components/UserSettingsModal';
-import AuthModal from './components/AuthModal';
 import AuthScreen from './components/AuthScreen';
 
 import HomeView from './views/HomeView';
@@ -39,7 +38,7 @@ export default function App() {
     isFullPlayerOpen
   } = useMusic();
 
-  const { isLoggedIn, isAuthModalOpen, closeAuthModal } = useUser();
+  const { isLoggedIn } = useUser();
 
   const handleOpenAddToPlaylist = (song) => {
     setPlaylistModalSong(song);
@@ -118,8 +117,7 @@ export default function App() {
         <UserSettingsModal onClose={() => setIsSettingsOpen(false)} />
       )}
 
-      {/* User Authentication Modal (Phone, User ID, Name) */}
-      <AuthModal isOpen={isAuthModalOpen} onClose={closeAuthModal} />
+
     </div>
   );
 }

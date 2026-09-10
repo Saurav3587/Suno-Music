@@ -17,7 +17,6 @@ export function UserProvider({ children }) {
     }
   });
 
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   // User Profile fields (derived from logged-in user or guest storage)
   const [userName, setUserName] = useState(() => {
@@ -264,40 +263,6 @@ export function UserProvider({ children }) {
     }
   };
 
-  // Sync guest library to cloud (only called when explicitly needed)
-  const syncGuestLibrary = async (token) => {
-    const activeToken = token || authToken;
-    if (!activeToken) return;
-
-    try {
-      const rawLikes = localStorage.getItem('suno_liked_songs');
-      const likedSongs = rawLikes ? JSON.parse(rawLikes) : [];
-      const rawRecent = localStorage.getItem('suno_recent_songs');
-      const recentSongs = rawRecent ? JSON.parse(rawRecent) : [];
-
-      const res = await fetch('/api/user/sync', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${activeToken}`
-        },
-        body: JSON.stringify({
-          playlists,
-          likedSongs,
-          recentSongs
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.library?.playlists) {
-          setPlaylists(data.library.playlists);
-        }
-      }
-    } catch (e) {
-      console.warn('Sync library failed:', e.message);
-    }
-  };
 
   // Handle sleep timer countdown
   const setSleepTimer = (minutes, onTimeExpired) => {
@@ -438,13 +403,9 @@ export function UserProvider({ children }) {
       currentUser,
       authToken,
       isLoggedIn: !!currentUser,
-      isAuthModalOpen,
-      openAuthModal: () => setIsAuthModalOpen(true),
-      closeAuthModal: () => setIsAuthModalOpen(false),
       login,
       register,
       logout,
-      syncGuestLibrary,
 
       // Profile State
       userName,
