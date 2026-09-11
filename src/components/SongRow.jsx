@@ -2,7 +2,17 @@ import React from 'react';
 import { Heart, Plus } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
 
-export default function SongRow({ song, index, playlist = null, onAddToPlaylist = null, onOpenNote = null }) {
+export default function SongRow({
+  song,
+  index,
+  playlist = null,
+  onAddToPlaylist = null,
+  onOpenNote = null,
+  isFromSearch = false,
+  onSearchArtist = null,
+  isGlass = false,
+  className = ''
+}) {
   const { currentTrack, isPlaying, playSong, togglePlay, toggleLike, isLiked } = useMusic();
 
   const isCurrent = currentTrack?.id === song.id;
@@ -13,7 +23,7 @@ export default function SongRow({ song, index, playlist = null, onAddToPlaylist 
     if (isCurrent) {
       togglePlay();
     } else {
-      playSong(song, playlist);
+      playSong(song, playlist, { isFromSearch });
     }
   };
 
@@ -27,8 +37,22 @@ export default function SongRow({ song, index, playlist = null, onAddToPlaylist 
     if (playlistHandler) playlistHandler(song);
   };
 
+  const handleArtistClick = (e) => {
+    if (onSearchArtist && song.artist) {
+      e.stopPropagation();
+      onSearchArtist(song.artist);
+    }
+  };
+
   return (
-    <div className={`song-row ${isCurrent ? 'active' : ''}`} onClick={handleRowClick}>
+    <div
+      className={`song-row ${isGlass ? 'glass-block' : ''} ${className} ${isCurrent ? 'active' : ''}`}
+      onClick={handleRowClick}
+    >
+      {typeof index === 'number' && (
+        <span className="song-row-number">{index + 1}</span>
+      )}
+
       <div className="song-row-thumb">
         <img src={song.image} alt={song.title} loading="lazy" />
         {isCurrent && isPlaying && (
@@ -90,7 +114,13 @@ export default function SongRow({ song, index, playlist = null, onAddToPlaylist 
               320k Master
             </span>
           )}
-          <span>{song.artist}</span>
+          <span
+            className={onSearchArtist ? 'artist-clickable' : ''}
+            onClick={handleArtistClick}
+            title={onSearchArtist ? `Search songs by ${song.artist}` : undefined}
+          >
+            {song.artist}
+          </span>
         </div>
       </div>
 

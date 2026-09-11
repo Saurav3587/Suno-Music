@@ -8,9 +8,6 @@ import {
   Clock,
   ShieldCheck,
   LogOut,
-  Heart,
-  ListMusic,
-  Play,
   Share2,
   User,
   X,
@@ -19,7 +16,6 @@ import {
   Trash2
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
-import { useMusic } from '../context/MusicContext';
 import ImageCropModal from './ImageCropModal';
 
 const AVATARS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
@@ -33,15 +29,12 @@ export default function UserSettingsModal({ onClose }) {
     userAvatar,
     setUserAvatar,
     updateUserProfile,
-    playlists,
     sleepTimerRemaining,
     setSleepTimer,
     cancelSleepTimer,
     currentUser,
     logout
   } = useUser();
-
-  const { likedSongs, recentSongs, playSong, togglePlay, isPlaying } = useMusic();
 
   // Internal state
   const [isEditing, setIsEditing] = useState(false);
@@ -143,56 +136,19 @@ export default function UserSettingsModal({ onClose }) {
   };
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        width: '100vw',
-        height: '100vh',
-        zIndex: 9999,
-        background: 'rgba(5, 4, 10, 0.85)',
-        backdropFilter: 'blur(25px)',
-        WebkitBackdropFilter: 'blur(25px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        animation: 'fadeIn 0.2s ease',
-        overflowY: 'auto'
-      }}
-    >
-      {/* Amazon Music-style Profile Container */}
-      <div
-        style={{
-          width: '100%',
-          maxWidth: '480px',
-          height: '100%',
-          maxHeight: '92vh',
-          background: 'var(--bg-base, #08070d)',
-          backgroundImage: `
-            radial-gradient(circle at 50% 10%, rgba(255, 59, 104, 0.16) 0%, transparent 45%),
-            radial-gradient(circle at 85% 30%, rgba(162, 56, 255, 0.14) 0%, transparent 50%),
-            linear-gradient(180deg, #110d1e 0%, #08070d 100%)
-          `,
-          border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.1))',
-          borderRadius: '28px',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          boxShadow: '0 20px 80px rgba(0, 0, 0, 0.85)',
-          position: 'relative'
-        }}
-      >
-        {/* Top Bar (Amazon Music Style): Back Button, "Profile", and Settings Gear in Top Right */}
+    <div className="user-settings-overlay" onClick={onClose}>
+      <div className="user-settings-sheet full-screen" onClick={e => e.stopPropagation()}>
+        {/* Top Bar: Back Button, "My Profile", and Settings Gear */}
         <header
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '16px 20px',
-            borderBottom: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
-            background: 'rgba(18, 14, 28, 0.75)',
-            backdropFilter: 'blur(15px)',
+            padding: 'calc(12px + var(--safe-top)) 18px 12px',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            background: 'rgba(14, 11, 20, 0.75)',
+            backdropFilter: 'var(--backdrop-liquid)',
+            WebkitBackdropFilter: 'var(--backdrop-liquid)',
             position: 'sticky',
             top: 0,
             zIndex: 10
@@ -201,30 +157,19 @@ export default function UserSettingsModal({ onClose }) {
           {/* Back Button */}
           <button
             type="button"
+            className="unified-back-pill"
             onClick={onClose}
             title="Back to Music"
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              background: 'rgba(255, 255, 255, 0.06)',
-              border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.1))',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'background 0.2s ease'
-            }}
           >
-            <ArrowLeft size={20} />
+            <ArrowLeft size={16} />
+            <span>Back</span>
           </button>
 
           {/* Title */}
           <h2
             style={{
               fontFamily: 'var(--font-display, "Outfit", sans-serif)',
-              fontSize: '1.15rem',
+              fontSize: '1.05rem',
               fontWeight: 800,
               color: '#ffffff',
               letterSpacing: '-0.3px',
@@ -234,7 +179,7 @@ export default function UserSettingsModal({ onClose }) {
             {isSettingsOpen ? 'Settings' : 'My Profile'}
           </h2>
 
-          {/* Settings Button in the Top Right Corner (Amazon Music style) */}
+          {/* Settings Button in Top Right */}
           <button
             type="button"
             onClick={() => setIsSettingsOpen(!isSettingsOpen)}
@@ -245,8 +190,8 @@ export default function UserSettingsModal({ onClose }) {
               borderRadius: '50%',
               background: isSettingsOpen
                 ? 'var(--gradient-romantic, linear-gradient(135deg, #ff3b68 0%, #a238ff 100%))'
-                : 'rgba(255, 255, 255, 0.06)',
-              border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.1))',
+                : 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
               color: '#ffffff',
               display: 'flex',
               alignItems: 'center',
@@ -261,7 +206,7 @@ export default function UserSettingsModal({ onClose }) {
         </header>
 
         {/* Scrollable Content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 30px 20px' }}>
+        <div className="user-settings-body">
           {isSettingsOpen ? (
             /* ============================================================ */
             /* SETTINGS DRAWER VIEW (Triggered by Top Right Gear Button)    */
@@ -824,246 +769,65 @@ export default function UserSettingsModal({ onClose }) {
                 </form>
               )}
 
-              {/* Metrics Stats Overview (Amazon Music / Spotify style) */}
+              {/* Profile Account Info & Quick Settings Card */}
               <div
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
-                  gap: '10px',
-                  marginBottom: '24px'
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
+                  borderRadius: '20px',
+                  padding: '18px',
+                  marginTop: '12px'
                 }}
               >
-                <div
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.04)',
-                    border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
-                    borderRadius: '16px',
-                    padding: '14px 10px',
-                    textAlign: 'center'
-                  }}
-                >
-                  <Heart size={18} color="var(--accent-rose, #ff3b68)" style={{ margin: '0 auto 6px auto' }} />
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>
-                    {likedSongs.length}
-                  </div>
-                  <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)', fontWeight: 600 }}>
-                    Favorites
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.04)',
-                    border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
-                    borderRadius: '16px',
-                    padding: '14px 10px',
-                    textAlign: 'center'
-                  }}
-                >
-                  <ListMusic size={18} color="var(--accent-lavender, #b185ff)" style={{ margin: '0 auto 6px auto' }} />
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>
-                    {playlists.length}
-                  </div>
-                  <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)', fontWeight: 600 }}>
-                    Playlists
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.04)',
-                    border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
-                    borderRadius: '16px',
-                    padding: '14px 10px',
-                    textAlign: 'center'
-                  }}
-                >
-                  <Clock size={18} color="var(--accent-gold, #f8c291)" style={{ margin: '0 auto 6px auto' }} />
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>
-                    {recentSongs.length}
-                  </div>
-                  <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)', fontWeight: 600 }}>
-                    Recents
-                  </div>
-                </div>
-              </div>
-
-              {/* My Playlists Showcase */}
-              <div style={{ marginBottom: '24px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h3 style={{ fontSize: '0.96rem', fontWeight: 800, color: '#ffffff', margin: 0 }}>
-                    Your Playlists
-                  </h3>
-                  <span style={{ fontSize: '0.74rem', color: 'var(--accent-rose-light, #ff758c)' }}>
-                    {playlists.length} Collection{playlists.length === 1 ? '' : 's'}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                  <span style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.6)', fontWeight: 600 }}>Account Status</span>
+                  <span style={{ fontSize: '0.75rem', color: '#1ed760', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#1ed760', boxShadow: '0 0 8px #1ed760' }} />
+                    Active & Synced
                   </span>
                 </div>
 
-                {playlists.length === 0 ? (
-                  <div
-                    style={{
-                      background: 'rgba(255,255,255,0.03)',
-                      borderRadius: '16px',
-                      padding: '20px',
-                      textAlign: 'center',
-                      color: 'rgba(255,255,255,0.5)',
-                      fontSize: '0.8rem'
-                    }}
-                  >
-                    No playlists created yet. Tap "+" on any song to create one!
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.82rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'rgba(255,255,255,0.7)' }}>
+                    <span>Audio Tier</span>
+                    <strong style={{ color: '#ffffff' }}>Studio Master (320kbps)</strong>
                   </div>
-                ) : (
-                  <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '6px' }}>
-                    {playlists.map((pl) => (
-                      <div
-                        key={pl.id}
-                        onClick={() => {
-                          if (pl.songs && pl.songs.length > 0) {
-                            playSong(pl.songs[0], pl.songs);
-                            onClose();
-                          }
-                        }}
-                        style={{
-                          flexShrink: 0,
-                          width: '120px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: '120px',
-                            height: '120px',
-                            borderRadius: '16px',
-                            overflow: 'hidden',
-                            position: 'relative',
-                            marginBottom: '6px',
-                            boxShadow: '0 6px 16px rgba(0,0,0,0.5)'
-                          }}
-                        >
-                          <img
-                            src={pl.cover}
-                            alt={pl.name}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
-                          <div
-                            style={{
-                              position: 'absolute',
-                              bottom: '6px',
-                              right: '6px',
-                              width: '28px',
-                              height: '28px',
-                              borderRadius: '50%',
-                              background: 'var(--gradient-romantic)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              boxShadow: '0 2px 8px rgba(0,0,0,0.4)'
-                            }}
-                          >
-                            <Play size={12} fill="#ffffff" strokeWidth={0} />
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            fontSize: '0.82rem',
-                            fontWeight: 700,
-                            color: '#ffffff',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                          }}
-                        >
-                          {pl.name}
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>
-                          {pl.songs ? pl.songs.length : 0} songs
-                        </div>
-                      </div>
-                    ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'rgba(255,255,255,0.7)' }}>
+                    <span>Experience</span>
+                    <strong style={{ color: 'var(--accent-rose-light, #ff758c)' }}>100% Ad-Free</strong>
                   </div>
-                )}
-              </div>
-
-              {/* Favorites Quick List */}
-              {likedSongs.length > 0 && (
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                    <h3 style={{ fontSize: '0.96rem', fontWeight: 800, color: '#ffffff', margin: 0 }}>
-                      Top Favorites
-                    </h3>
-                    <span style={{ fontSize: '0.74rem', color: 'rgba(255,255,255,0.5)' }}>
-                      {likedSongs.length} saved
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {likedSongs.slice(0, 4).map((song) => (
-                      <div
-                        key={song.id}
-                        onClick={() => {
-                          playSong(song, likedSongs);
-                          onClose();
-                        }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '12px',
-                          background: 'rgba(255, 255, 255, 0.04)',
-                          padding: '8px 12px',
-                          borderRadius: '12px',
-                          cursor: 'pointer',
-                          transition: 'background 0.15s ease'
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)')}
-                      >
-                        <img
-                          src={song.image}
-                          alt={song.title}
-                          style={{ width: '38px', height: '38px', borderRadius: '8px', objectFit: 'cover' }}
-                        />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div
-                            style={{
-                              fontSize: '0.84rem',
-                              fontWeight: 700,
-                              color: '#ffffff',
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis'
-                            }}
-                          >
-                            {song.title}
-                          </div>
-                          <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)' }}>
-                            {song.artist}
-                          </div>
-                        </div>
-                        <Play size={14} color="var(--accent-rose-light, #ff758c)" />
-                      </div>
-                    ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'rgba(255,255,255,0.7)' }}>
+                    <span>Cloud Storage</span>
+                    <strong style={{ color: '#ffffff' }}>MySQL Database</strong>
                   </div>
                 </div>
-              )}
 
-              {/* Master Audio Quality Guarantee Badge */}
-              <div
-                style={{
-                  background: 'linear-gradient(135deg, rgba(255, 59, 104, 0.1) 0%, rgba(162, 56, 255, 0.12) 100%)',
-                  border: '1px solid var(--border-glow, rgba(255, 75, 114, 0.25))',
-                  borderRadius: '16px',
-                  padding: '14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px'
-                }}
-              >
-                <ShieldCheck size={22} color="var(--accent-rose-light, #ff758c)" style={{ flexShrink: 0 }} />
-                <div style={{ fontSize: '0.74rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>
-                  <strong style={{ color: '#ffffff', display: 'block', fontSize: '0.8rem' }}>
-                    Suno Music Studio Master
-                  </strong>
-                  320kbps CD Quality Audio • 100% Ad-Free • Persistent Taste Memory
+                <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsSettingsOpen(true)}
+                    style={{
+                      width: '100%',
+                      padding: '11px',
+                      borderRadius: '12px',
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      color: '#ffffff',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)')}
+                  >
+                    <Settings size={15} color="var(--accent-rose-light, #ff758c)" />
+                    <span>Manage Settings & Audio Quality</span>
+                  </button>
                 </div>
               </div>
             </div>

@@ -59,11 +59,11 @@ export default function Visualizer({ isPlaying }) {
   }, [isPlaying]);
 
   return (
-    <div style={{ width: '100%', height: '42px', margin: '6px 0 14px 0' }}>
+    <div style={{ width: '100%', height: '24px', margin: '2px 0 8px 0' }}>
       <canvas
         ref={canvasRef}
         width={340}
-        height={42}
+        height={24}
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
     </div>

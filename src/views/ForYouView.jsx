@@ -4,7 +4,7 @@ import SongRow from '../components/SongRow';
 import { useMusic } from '../context/MusicContext';
 import { useUser } from '../context/UserContext';
 
-export default function ForYouView({ onOpenAddToPlaylist }) {
+export default function ForYouView({ onOpenAddToPlaylist, onSearchArtist }) {
   const { recentSongs, playSong } = useMusic();
   const { userName } = useUser();
 
@@ -158,6 +158,7 @@ export default function ForYouView({ onOpenAddToPlaylist }) {
               index={i}
               playlist={playlist.songs}
               onAddToPlaylist={onOpenAddToPlaylist}
+              onSearchArtist={onSearchArtist}
             />
           ))
         ) : (

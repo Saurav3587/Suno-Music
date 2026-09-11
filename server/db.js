@@ -122,9 +122,16 @@ async function createTables() {
       song_data JSON NOT NULL,
       position INT DEFAULT 0,
       added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_playlist_id (playlist_id)
+      INDEX idx_playlist_id (playlist_id),
+      UNIQUE KEY uq_pl_song (playlist_id, song_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
+
+  try {
+    await pool.query(`ALTER TABLE playlist_songs ADD UNIQUE KEY uq_pl_song (playlist_id, song_id)`);
+  } catch (err) {
+    // Unique key already exists
+  }
 
   // 4. Liked Songs
   await pool.query(`

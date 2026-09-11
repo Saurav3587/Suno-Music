@@ -60,7 +60,8 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
     isLiked,
     autoplayEnabled,
     toggleAutoplay,
-    queue
+    queue,
+    radioMoodLabel
   } = useMusic();
 
   const [showLyrics, setShowLyrics] = useState(false);
@@ -68,8 +69,6 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
   const [loadingLyrics, setLoadingLyrics] = useState(false);
 
   // AI DJ Mood State
-  const [aiInsight, setAiInsight] = useState('');
-  const [aiLoading, setAiLoading] = useState(false);
   const [showAiChat, setShowAiChat] = useState(false);
   const [aiChatInput, setAiChatInput] = useState('');
   const [activeMoodName, setActiveMoodName] = useState('');
@@ -77,7 +76,6 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
   const [aiDjSongsCount, setAiDjSongsCount] = useState(0);
   const [aiChatLoading, setAiChatLoading] = useState(false);
   const [aiAvailable, setAiAvailable] = useState(false);
-  const aiInsightTrackRef = useRef(null);
   const chatInputRef = useRef(null);
 
   const PRESET_MOODS = [
@@ -96,46 +94,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
     fetch('/api/ai/status').then(r => r.json()).then(d => setAiAvailable(d.available)).catch(() => {});
   }, []);
 
-  // Fetch AI insight when track changes
-  useEffect(() => {
-    if (!currentTrack || !currentTrack.id) return;
-    if (aiInsightTrackRef.current === currentTrack.id) return;
-    aiInsightTrackRef.current = currentTrack.id;
 
-    // Get the next song in queue for explanation
-    const nextIdx = queue.findIndex(s => s.id === currentTrack.id) + 1;
-    const nextSong = nextIdx < queue.length ? queue[nextIdx] : null;
-
-    setAiLoading(true);
-    const fetchInsight = async () => {
-      try {
-        if (nextSong) {
-          // Explain why current song follows the previous
-          const res = await fetch('/api/ai/explain', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ currentSong: currentTrack, nextSong, recentHistory: [] })
-          });
-          const data = await res.json();
-          setAiInsight(data.reasoning || '');
-        } else {
-          // Session-level insight
-          const res = await fetch('/api/ai/session-insight', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ currentTrack, recentHistory: [], likedSongs: [] })
-          });
-          const data = await res.json();
-          setAiInsight(data.insight || '');
-        }
-      } catch {
-        setAiInsight('');
-      } finally {
-        setAiLoading(false);
-      }
-    };
-    fetchInsight();
-  }, [currentTrack?.id, queue]);
 
   // AI DJ Mood selection handler: plays curated songs immediately based on mood
   const handleSelectMood = useCallback(async (moodText) => {
@@ -248,8 +207,24 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
     }
   };
 
+  const [isClosing, setIsClosing] = useState(false);
+
+  const handleClose = useCallback(() => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setIsFullPlayerOpen(false);
+    }, 240);
+  }, [setIsFullPlayerOpen]);
+
   return (
-    <div className="full-player-sheet">
+    <div
+      className="full-player-sheet"
+      style={{
+        transform: isClosing ? 'translateY(100%)' : 'translateY(0)',
+        transition: 'transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease',
+        opacity: isClosing ? 0 : 1
+      }}
+    >
       {/* Blurred Album Artwork Background with smooth crossfade */}
       <div
         key={`bg-${currentTrack.id}`}
@@ -261,10 +236,10 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
       <div className="full-player-header">
         <button
           className="action-btn"
-          onClick={() => setIsFullPlayerOpen(false)}
-          title="Minimize"
+          onClick={handleClose}
+          title="Minimize to mini player"
         >
-          <ChevronDown size={28} />
+          <ChevronDown size={26} />
         </button>
 
         <div className="player-header-title">
@@ -277,7 +252,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
           onClick={handleAddPlaylist}
           title="Add to Playlist"
         >
-          <Plus size={24} />
+          <Plus size={22} />
         </button>
       </div>
 
@@ -285,24 +260,25 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
       {showLyrics ? (
         <div style={{
           flex: 1,
+          minHeight: 0,
           overflowY: 'auto',
-          padding: '20px',
+          padding: '16px',
           background: 'rgba(0,0,0,0.5)',
-          borderRadius: '24px',
+          borderRadius: '20px',
           backdropFilter: 'blur(20px)',
-          margin: '10px 0',
+          margin: '6px 0',
           position: 'relative',
           zIndex: 2,
           textAlign: 'center'
         }}>
-          <h3 style={{ fontSize: '1rem', color: '#ff85a2', marginBottom: '16px' }}>Lyrics</h3>
+          <h3 style={{ fontSize: '0.92rem', color: '#ff85a2', marginBottom: '12px' }}>Lyrics</h3>
           {loadingLyrics ? (
             <p style={{ color: 'rgba(255,255,255,0.6)' }}>Finding lyrics...</p>
           ) : (
             <p style={{
               whiteSpace: 'pre-line',
-              lineHeight: '2',
-              fontSize: '1.05rem',
+              lineHeight: '1.8',
+              fontSize: '0.98rem',
               color: '#ffffff',
               fontFamily: 'var(--font-display)'
             }}>
@@ -368,7 +344,22 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
         <div className="scrubber-times">
           <span>{formatTime(currentTime)}</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            {currentTrack.isSpotify || currentTrack.source === 'spotify-resolved' || (currentTrack.badge && currentTrack.badge.includes('Spotify')) ? (
+            {radioMoodLabel ? (
+              <span style={{
+                color: '#ff758c',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                background: 'rgba(255, 59, 104, 0.12)',
+                border: '1px solid rgba(255, 59, 104, 0.3)',
+                padding: '2px 8px',
+                borderRadius: '100px',
+                fontSize: '0.68rem',
+                fontWeight: 600
+              }}>
+                <Sparkles size={11} /> {radioMoodLabel}
+              </span>
+            ) : currentTrack.isSpotify || currentTrack.source === 'spotify-resolved' || (currentTrack.badge && currentTrack.badge.includes('Spotify')) ? (
               <span style={{ color: '#1db954', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <SpotifyIcon size={13} /> Spotify 320k
               </span>
@@ -421,43 +412,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
         </button>
       </div>
 
-      {/* AI DJ Insight Bubble */}
-      {aiInsight && (
-        <div className="ai-dj-bubble" style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          padding: '10px 16px',
-          margin: '0 8px 4px',
-          background: 'linear-gradient(135deg, rgba(162, 56, 255, 0.15) 0%, rgba(255, 59, 104, 0.12) 100%)',
-          border: '1px solid rgba(162, 56, 255, 0.25)',
-          borderRadius: '16px',
-          backdropFilter: 'blur(12px)',
-          animation: 'aiDjFadeIn 0.5s cubic-bezier(0.22, 1, 0.36, 1)'
-        }}>
-          <div style={{
-            width: '28px',
-            height: '28px',
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #a238ff 0%, #ff3b68 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-            animation: aiLoading ? 'aiDjPulse 1.5s ease-in-out infinite' : 'none'
-          }}>
-            <Sparkles size={14} color="#ffffff" />
-          </div>
-          <span style={{
-            fontSize: '0.78rem',
-            color: 'rgba(255, 255, 255, 0.85)',
-            lineHeight: 1.4,
-            fontFamily: 'var(--font-display, "Outfit", sans-serif)'
-          }}>
-            {aiLoading ? 'AI DJ is thinking...' : aiInsight}
-          </span>
-        </div>
-      )}
+
 
       {/* AI DJ Mood Player Overlay */}
       {showAiChat && (
@@ -686,16 +641,8 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
         </div>
       )}
 
-      {/* Footer Tools: Add to Playlist, AI DJ, Smart Flow Autoplay, & Lyrics */}
+      {/* Footer Tools: Smartly balanced 3 sections — AI DJ, Smart Flow, & Lyrics */}
       <div className="player-footer-tools">
-        <button
-          className="tool-chip"
-          onClick={handleAddPlaylist}
-        >
-          <ListPlus size={16} />
-          <span>Add to Playlist</span>
-        </button>
-
         <button
           className={`tool-chip ${showAiChat ? 'active' : ''}`}
           onClick={() => {
@@ -705,12 +652,13 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
             }
           }}
           style={{
-            borderColor: showAiChat ? 'rgba(162, 56, 255, 0.5)' : 'rgba(255,255,255,0.1)',
-            color: showAiChat ? '#d1b8ff' : 'rgba(255,255,255,0.6)',
-            background: showAiChat ? 'rgba(162, 56, 255, 0.15)' : undefined
+            borderColor: showAiChat ? 'rgba(162, 56, 255, 0.55)' : undefined,
+            color: showAiChat ? '#d1b8ff' : undefined,
+            background: showAiChat ? 'rgba(162, 56, 255, 0.18)' : undefined,
+            boxShadow: showAiChat ? '0 4px 16px rgba(162, 56, 255, 0.3)' : undefined
           }}
         >
-          <Sparkles size={16} />
+          <Sparkles size={15} />
           <span>AI DJ</span>
         </button>
 
@@ -719,19 +667,27 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
           onClick={toggleAutoplay}
           title="Toggles Studio Master endless autoplay flow"
           style={{
-            borderColor: autoplayEnabled ? 'rgba(29, 185, 84, 0.4)' : 'rgba(255,255,255,0.1)',
-            color: autoplayEnabled ? '#1db954' : 'rgba(255,255,255,0.6)'
+            borderColor: autoplayEnabled ? 'rgba(29, 185, 84, 0.5)' : undefined,
+            color: autoplayEnabled ? '#1db954' : undefined,
+            background: autoplayEnabled ? 'rgba(29, 185, 84, 0.16)' : undefined,
+            boxShadow: autoplayEnabled ? '0 4px 16px rgba(29, 185, 84, 0.25)' : undefined
           }}
         >
-          <InfinityIcon size={16} />
+          <InfinityIcon size={15} />
           <span>{autoplayEnabled ? 'Smart Flow' : 'Autoplay Off'}</span>
         </button>
 
         <button
           className={`tool-chip ${showLyrics ? 'active' : ''}`}
           onClick={handleToggleLyrics}
+          style={{
+            borderColor: showLyrics ? 'rgba(255, 59, 104, 0.55)' : undefined,
+            color: showLyrics ? '#ff85a2' : undefined,
+            background: showLyrics ? 'rgba(255, 59, 104, 0.18)' : undefined,
+            boxShadow: showLyrics ? '0 4px 16px rgba(255, 59, 104, 0.3)' : undefined
+          }}
         >
-          <FileText size={16} />
+          <FileText size={15} />
           <span>{showLyrics ? 'Hide Lyrics' : 'Lyrics'}</span>
         </button>
       </div>

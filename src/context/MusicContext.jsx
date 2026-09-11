@@ -67,6 +67,20 @@ export function MusicProvider({ children }) {
     return localStorage.getItem('suno_autoplay_enabled') !== 'false';
   });
 
+  // Current radio mood label (e.g. 'Divine & Bhakti', 'Sad & Heartbroken')
+  const [radioMoodLabel, setRadioMoodLabel] = useState('');
+
+  // Global Unified Playlist Modal state
+  const [activePlaylistModal, setActivePlaylistModal] = useState(null);
+
+  const openPlaylist = (playlistData) => {
+    setActivePlaylistModal(playlistData);
+  };
+
+  const closePlaylist = () => {
+    setActivePlaylistModal(null);
+  };
+
   const skippedArtistsRef = useRef([]);
   const isPrefetchingRef = useRef(false);
   const playedCanonicalTitlesRef = useRef(new Set());
@@ -391,7 +405,7 @@ export function MusicProvider({ children }) {
   }, [currentTrack]);
 
   // Play a specific song (handles both YouTube, direct CDN audio, and auto-resolving Spotify tracks)
-  const playSong = async (song, newQueue = null) => {
+  const playSong = async (song, newQueue = null, options = {}) => {
     if (!song) return;
 
     // Prioritize Studio 320k direct master audio streams over YouTube embeds
@@ -427,9 +441,33 @@ export function MusicProvider({ children }) {
 
     // Update queue with deduplication
     let targetQueue = queue;
-    if (newQueue && Array.isArray(newQueue)) {
+    if (options.isFromSearch) {
+      // From search: initialize with activeSong and immediately build the smart mood/genre radio queue
+      targetQueue = [activeSong];
+      setQueue(targetQueue);
+
+      fetch('/api/radio/similar-queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          seedSong: activeSong,
+          candidateTracks: Array.isArray(newQueue) ? newQueue : []
+        })
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data && Array.isArray(data.songs) && data.songs.length > 0) {
+            const smartQueue = deduplicateQueue(data.songs);
+            setQueue(smartQueue);
+            setQueueIndex(0);
+            if (data.moodLabel) setRadioMoodLabel(data.moodLabel);
+          }
+        })
+        .catch(err => console.warn('Smart mood queue fetch failed:', err));
+    } else if (newQueue && Array.isArray(newQueue)) {
       targetQueue = deduplicateQueue(newQueue);
       setQueue(targetQueue);
+      setRadioMoodLabel('');
     } else if (queue.length === 0 || !queue.some(s => s.id === activeSong.id)) {
       targetQueue = deduplicateQueue([activeSong, ...queue.filter(s => s.id !== activeSong.id)]);
       setQueue(targetQueue);
@@ -494,25 +532,28 @@ export function MusicProvider({ children }) {
   };
 
 
-  // Autoplay prefetch: simple direct retrieval by artist
+  // Autoplay prefetch: smart mood & genre radio continuity
   const prefetchAutoplayTracks = async (seed) => {
     if (!autoplayEnabled || isPrefetchingRef.current || !seed) return;
     isPrefetchingRef.current = true;
 
     try {
-      const artist = seed.artist ? seed.artist.split(/[,&]/)[0].trim() : '';
-      const query = artist ? `${artist} songs` : 'popular songs';
-      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      const res = await fetch('/api/radio/similar-queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seedSong: seed })
+      });
       const data = await res.json();
-      const songs = data.results || [];
+      const songs = data.songs || [];
 
       if (songs.length > 0) {
         setQueue(prevQueue => {
           const existingIds = new Set(prevQueue.map(s => s.id));
-          const toAdd = songs.filter(s => !existingIds.has(s.id) && s.id !== seed.id).slice(0, 6);
+          const toAdd = songs.filter(s => !existingIds.has(s.id) && s.id !== seed.id).slice(0, 8);
           if (toAdd.length === 0) return prevQueue;
           return [...prevQueue, ...toAdd];
         });
+        if (data.moodLabel) setRadioMoodLabel(data.moodLabel);
       }
     } catch (e) {
       console.warn('Autoplay prefetch failed:', e.message);
@@ -610,19 +651,22 @@ export function MusicProvider({ children }) {
         prefetchAutoplayTracks(queue[nextIndex]);
       }
     } else if (autoplayEnabled && currentTrack) {
-      // Reached end of current queue: simply fetch more songs by the artist
+      // Reached end of current queue: fetch more songs matching the current track's mood/genre
       try {
-        const artist = currentTrack.artist ? currentTrack.artist.split(/[,&]/)[0].trim() : '';
-        const query = artist ? `${artist} songs` : 'popular songs';
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch('/api/radio/similar-queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seedSong: currentTrack })
+        });
         const data = await res.json();
-        const items = data.results || [];
+        const items = data.songs || [];
         const existingIds = new Set(queue.map(s => s.id));
         const newMatching = items.filter(s => !existingIds.has(s.id) && s.id !== currentTrack.id);
 
         if (newMatching.length > 0) {
           const combinedQueue = deduplicateQueue([...queue, ...newMatching]);
           setQueue(combinedQueue);
+          if (data.moodLabel) setRadioMoodLabel(data.moodLabel);
           playSong(newMatching[0], combinedQueue);
           return;
         }
@@ -755,7 +799,11 @@ export function MusicProvider({ children }) {
       toggleLike,
       isLiked,
       autoplayEnabled,
-      toggleAutoplay
+      toggleAutoplay,
+      radioMoodLabel,
+      activePlaylistModal,
+      openPlaylist,
+      closePlaylist
     }}>
       {children}
     </MusicContext.Provider>

@@ -51,6 +51,25 @@ export async function searchSongs(query, limit = 20) {
   }
 }
 
+// Seeded PRNG shuffle helper for consistent time-based rotation
+function seededShuffle(array, seed) {
+  const arr = [...array];
+  let m = arr.length, t, i;
+  let currentSeed = seed;
+  while (m) {
+    currentSeed = (currentSeed * 9301 + 49297) % 233280;
+    i = Math.floor((currentSeed / 233280) * m--);
+    t = arr[m];
+    arr[m] = arr[i];
+    arr[i] = t;
+  }
+  return arr;
+}
+
+// Master pool cache for Timeless Melodies & Acoustics (cached for 12 hours)
+let acousticMasterPool = null;
+let acousticMasterPoolTime = 0;
+
 /**
  * Fetches top romantic charts / curated love playlists
  */
@@ -73,6 +92,60 @@ export async function getRomanticHits(limit = 30) {
   } catch (err) {
     console.error('getRomanticHits error:', err.message);
     return await searchSongs('love hits ed sheeran taylor swift arijit singh', limit);
+  }
+}
+
+/**
+ * Builds and caches a rich pool of 50-80 timeless melodies, acoustics, and unplugged tracks
+ */
+export async function getTimelessMelodiesPool() {
+  const now = Date.now();
+  if (acousticMasterPool && (now - acousticMasterPoolTime) < 12 * 60 * 60 * 1000) {
+    return acousticMasterPool;
+  }
+
+  try {
+    const [p1, p2, p3, p4] = await Promise.all([
+      getRomanticHits(35),
+      searchSongs('acoustic unplugged hindi arijit anuv mohit prateek', 25),
+      searchSongs('timeless melodies evergreen romantic arijit atif kk', 25),
+      searchSongs('acoustic unplugged guitar ed sheeran coldplay', 20)
+    ]);
+
+    const combined = [...p1, ...p2, ...p3, ...p4];
+    const deduped = deduplicateTrackList(combined, { maxCount: 100 });
+    
+    if (deduped.length > 0) {
+      acousticMasterPool = deduped;
+      acousticMasterPoolTime = now;
+      return deduped;
+    }
+  } catch (err) {
+    console.error('getTimelessMelodiesPool error:', err.message);
+  }
+
+  return acousticMasterPool || (await getRomanticHits(30));
+}
+
+/**
+ * Returns an automatically rotated batch of acoustic / timeless tracks
+ * Cycles every 4 hours based on time-slot seed
+ */
+export async function getRotatedAcousticHits(limit = 20) {
+  try {
+    const pool = await getTimelessMelodiesPool();
+    if (!pool || pool.length === 0) return [];
+
+    // 4-hour cycle slot
+    const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+    const currentSlot = Math.floor(Date.now() / FOUR_HOURS_MS);
+
+    // Shuffle pool deterministically for this 4-hour window
+    const shuffled = seededShuffle(pool, currentSlot + 42);
+    return shuffled.slice(0, limit);
+  } catch (err) {
+    console.error('getRotatedAcousticHits error:', err.message);
+    return await getRomanticHits(limit);
   }
 }
 

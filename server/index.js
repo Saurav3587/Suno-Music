@@ -1,13 +1,15 @@
 import express from 'express';
 import cors from 'cors';
 import yts from 'yt-search';
-import { searchSongs, getTrendingSongs, getRomanticHits, generateAutoPlaylist } from './autoPlaylistService.js';
+import { searchSongs, getTrendingSongs, getRomanticHits, getRotatedAcousticHits, generateAutoPlaylist } from './autoPlaylistService.js';
 import { normalizeSong } from './decrypt.js';
 import { getSpotifyCharts, parseSpotifyUrl, getSpotifyEntity, resolveTrackToPlayable, getOfficialPlaylistsList, getSpotifyPlaylistByKeyOrId } from './spotifyService.js';
 import { deduplicateTrackList } from './dedupService.js';
 import { initDatabase, createUser, getUserByLogin, updateUserProfileDb, getUserLibrary, syncUserLibrary, toggleLikedSongDb, createPlaylistDb, deletePlaylistDb, addSongToPlaylistDb, recordListenEventDb, getMostListenedSongs24h } from './db.js';
 import { hashPassword, comparePassword, generateToken, requireAuth, optionalAuth } from './auth.js';
 import { analyzeListeningSession, getAIRecommendationReasoning, interpretMoodRequest, isAIAvailable } from './llmService.js';
+import { generateSimilarMoodQueue } from './moodRadioService.js';
+import { searchAllPlaylists, getPlaylistDetails } from './playlistSearchService.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -101,30 +103,109 @@ app.get('/api/yt-search', async (req, res) => {
   }
 });
 
-// Get Top Charts & Trending
-app.get('/api/charts', async (req, res) => {
-  const cacheKey = 'charts_trending';
-  const cached = getCache(cacheKey, 600);
-  if (cached) return res.json({ songs: cached });
+// ============================================================
+// WORLDWIDE 24-HOUR DAILY TOP 50 ENGINE (6-HOUR AUTO-CYCLE)
+// ============================================================
+let globalTopHitsCache = null;
 
+async function refreshGlobalTopHitsChart() {
   try {
-    const songs = await getTrendingSongs(30);
-    setCache(cacheKey, songs);
-    res.json({ songs });
+    const now = Date.now();
+    console.log('🌍 [Worldwide Top Hits] Refreshing Spotify Daily Top 50 Worldwide (global-50)...');
+
+    const globalChart = await getSpotifyCharts('global-50');
+    const rawTracks = (globalChart?.tracks || []).slice(0, 30);
+
+    const resolved = await Promise.all(
+      rawTracks.map(async (t, idx) => {
+        try {
+          const playable = await resolveTrackToPlayable(t);
+          if (playable) {
+            return {
+              ...playable,
+              rank: idx + 1,
+              badge: `#${idx + 1} Global`,
+              isSpotify: true
+            };
+          }
+        } catch (e) {}
+
+        return {
+          id: `sp_${t.spotifyId || idx}`,
+          spotifyId: t.spotifyId,
+          title: t.title,
+          artist: t.artist,
+          duration: t.duration,
+          image: globalChart?.cover || 'https://charts-images.scdn.co/assets/locale_en/regional/daily/region_global_default.jpg',
+          album: 'Top 50 - Global',
+          badge: `#${idx + 1} Global`,
+          rank: idx + 1,
+          isSpotify: true
+        };
+      })
+    );
+
+    globalTopHitsCache = {
+      id: '37i9dQZEVXbMDoHDwVN2tF',
+      key: 'global-50',
+      name: 'Top Global Hits',
+      title: 'Top Global Hits',
+      description: 'Official Spotify Worldwide Daily Top 50: The most listened songs across the globe in the last 24 hours • Auto-updates every 6 hours',
+      cover: globalChart?.cover || 'https://charts-images.scdn.co/assets/locale_en/regional/daily/region_global_default.jpg',
+      badge: 'Worldwide Top 50',
+      category: 'charts',
+      trackCount: resolved.length,
+      lastUpdated: now,
+      nextUpdate: now + (6 * 60 * 60 * 1000),
+      updateIntervalHours: 6,
+      tracks: resolved,
+      songs: resolved
+    };
+
+    console.log(`✅ [Worldwide Top Hits] Global Daily Chart refreshed successfully: ${resolved.length} tracks. Next update in 6h.`);
+    return globalTopHitsCache;
+  } catch (err) {
+    console.error('❌ [Worldwide Top Hits] Error refreshing Worldwide 24h chart:', err.message);
+    if (!globalTopHitsCache) {
+      console.warn('Falling back to JioSaavn trending for /api/charts');
+      const fallbackSongs = await getTrendingSongs(25);
+      return { songs: fallbackSongs };
+    }
+    return globalTopHitsCache;
+  }
+}
+
+// Automatically re-compute Worldwide chart every 6 hours
+setInterval(refreshGlobalTopHitsChart, 6 * 60 * 60 * 1000);
+
+// Manual trigger endpoint for worldwide top hits
+app.post('/api/charts/refresh-global', async (req, res) => {
+  const chart = await refreshGlobalTopHitsChart();
+  res.json({ success: true, chart });
+});
+
+// Get Top Charts & Trending (Actual Worldwide Global Top 50)
+app.get('/api/charts', async (req, res) => {
+  try {
+    if (!globalTopHitsCache || !globalTopHitsCache.songs || globalTopHitsCache.songs.length === 0) {
+      const chart = await refreshGlobalTopHitsChart();
+      return res.json({ songs: chart?.songs || [] });
+    }
+    res.json({ songs: globalTopHitsCache.songs });
   } catch (err) {
     console.error('Charts API error:', err);
     res.status(500).json({ error: 'Failed to get charts', message: err.message });
   }
 });
 
-// Get Curated Featured & Essential Hits
+// Get Curated Featured & Essential Hits (Rotates every 4 hours with fresh acoustic & timeless melodies)
 app.get(['/api/featured', '/api/essentials', '/api/romantic'], async (req, res) => {
-  const cacheKey = 'featured_hits';
-  const cached = getCache(cacheKey, 600);
+  const cacheKey = 'featured_hits_rotated';
+  const cached = getCache(cacheKey, 300);
   if (cached) return res.json({ songs: cached });
 
   try {
-    const songs = await getRomanticHits(30);
+    const songs = await getRotatedAcousticHits(25);
     setCache(cacheKey, songs);
     res.json({ songs });
   } catch (err) {
@@ -178,6 +259,44 @@ app.post('/api/auto-playlist', async (req, res) => {
   } catch (err) {
     console.error('Auto playlist error:', err);
     res.status(500).json({ error: 'Failed to generate playlist', message: err.message });
+  }
+});
+
+// Smart Mood & Genre Radio Queue (Guarantees matching mood/genre continuity from search)
+app.post('/api/radio/similar-queue', async (req, res) => {
+  const { seedSong, candidateTracks = [] } = req.body;
+  try {
+    const result = await generateSimilarMoodQueue(seedSong, candidateTracks);
+    res.json(result);
+  } catch (err) {
+    console.error('Similar queue generation error:', err);
+    res.status(500).json({ error: 'Failed to generate similar queue', mood: 'general', moodLabel: 'All Songs', songs: seedSong ? [seedSong] : [] });
+  }
+});
+
+// Search Playlists across YouTube Music, JioSaavn, and Spotify
+app.get('/api/search/playlists', async (req, res) => {
+  const query = req.query.q || '';
+  if (!query.trim()) return res.json({ playlists: [] });
+
+  try {
+    const playlists = await searchAllPlaylists(query, 12);
+    res.json({ playlists });
+  } catch (err) {
+    console.error('Playlist search error:', err);
+    res.status(500).json({ error: 'Failed to search playlists', playlists: [] });
+  }
+});
+
+// Unified Playlist Details (YouTube Music, JioSaavn, Spotify)
+app.get('/api/playlist/unified/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const details = await getPlaylistDetails(id);
+    res.json(details);
+  } catch (err) {
+    console.error('Unified playlist details error:', err);
+    res.status(500).json({ error: 'Failed to load playlist details', message: err.message });
   }
 });
 
@@ -297,6 +416,24 @@ app.get('/api/spotify/playlist/:keyOrId', async (req, res) => {
     return res.json(todayTopHitsCache);
   }
 
+  // If requesting Worldwide Daily Top 50, serve the worldwide chart
+  if (keyOrId === 'global-50') {
+    if (!globalTopHitsCache) {
+      await refreshGlobalTopHitsChart();
+    }
+    return res.json(globalTopHitsCache);
+  }
+
+  // If requesting YouTube Music or JioSaavn unified playlist
+  if (keyOrId.startsWith('yt_pl_') || keyOrId.startsWith('saavn_pl_')) {
+    try {
+      const details = await getPlaylistDetails(keyOrId);
+      return res.json(details);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   const cacheKey = `spotify_playlist_full_${keyOrId}`;
   const cached = getCache(cacheKey, 600);
   if (cached) return res.json(cached);
@@ -390,6 +527,91 @@ app.post('/api/spotify/import', async (req, res) => {
   } catch (err) {
     console.error('Spotify import error:', err.message);
     res.status(500).json({ error: 'Failed to import Spotify playlist', message: err.message });
+  }
+});
+
+// Smart Universal Playlist Importer (Spotify, YouTube Music, JioSaavn)
+app.post('/api/playlist/import', async (req, res) => {
+  const { url } = req.body;
+  if (!url || typeof url !== 'string' || !url.trim()) {
+    return res.status(400).json({ error: 'Please provide a valid playlist link' });
+  }
+
+  const cleanUrl = url.trim();
+
+  try {
+    // 1. Spotify URL parsing (playlist, album, track)
+    const spotifyParsed = parseSpotifyUrl(cleanUrl);
+    if (spotifyParsed) {
+      const entity = await getSpotifyEntity(spotifyParsed.type, spotifyParsed.id);
+      const tracksToResolve = (entity.tracks || []).slice(0, 25);
+      const resolvedTracks = [];
+
+      for (const track of tracksToResolve) {
+        const resolved = await resolveTrackToPlayable(track);
+        if (resolved) resolvedTracks.push(resolved);
+      }
+
+      return res.json({
+        id: `spotify_${entity.id}`,
+        name: entity.name || 'Imported Spotify Playlist',
+        description: entity.description || 'Imported from Spotify',
+        cover: entity.cover,
+        trackCount: entity.trackCount || resolvedTracks.length,
+        source: 'spotify',
+        badge: 'Spotify 320k',
+        songs: resolvedTracks
+      });
+    }
+
+    // 2. YouTube / YouTube Music playlist link
+    const ytListMatch = cleanUrl.match(/[?&]list=([a-zA-Z0-9_-]+)/i);
+    if (ytListMatch && ytListMatch[1]) {
+      const listId = ytListMatch[1];
+      const pl = await getPlaylistDetails(`yt_pl_${listId}`);
+      if (pl && pl.songs && pl.songs.length > 0) {
+        return res.json({
+          ...pl,
+          description: pl.description || 'Imported from YouTube Music',
+          badge: 'YouTube Music'
+        });
+      }
+    }
+
+    // 3. JioSaavn link
+    const saavnMatch = cleanUrl.match(/jiosaavn\.com\/(?:featured|s\/playlist)\/[^/]+\/([a-zA-Z0-9_-]+)/i) ||
+                       cleanUrl.match(/[?&]listid=([0-9]+)/i);
+    if (saavnMatch && saavnMatch[1]) {
+      const listId = saavnMatch[1];
+      const pl = await getPlaylistDetails(`saavn_pl_${listId}`);
+      if (pl && pl.songs && pl.songs.length > 0) {
+        return res.json({
+          ...pl,
+          description: pl.description || 'Imported from JioSaavn',
+          badge: 'Studio 320k'
+        });
+      }
+    }
+
+    // 4. Fallback search by title or keywords
+    const searchPlaylists = await searchAllPlaylists(cleanUrl, 1);
+    if (searchPlaylists.length > 0) {
+      const topMatch = searchPlaylists[0];
+      const pl = await getPlaylistDetails(topMatch.id, topMatch);
+      if (pl && pl.songs && pl.songs.length > 0) {
+        return res.json({
+          ...pl,
+          badge: pl.badge || 'Imported Playlist'
+        });
+      }
+    }
+
+    return res.status(404).json({
+      error: 'Could not resolve playlist from this URL. Please verify that the link is public and accessible.'
+    });
+  } catch (err) {
+    console.error('Smart playlist import error:', err.message);
+    return res.status(500).json({ error: 'Failed to import playlist', message: err.message });
   }
 });
 
@@ -606,6 +828,22 @@ app.post('/api/user/playlist/:id/song', requireAuth, async (req, res) => {
   }
 });
 
+// Batch save imported playlist with all songs directly into MySQL database
+app.post('/api/user/playlist/import-save', requireAuth, async (req, res) => {
+  const { name, description = '', cover = '', songs = [] } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Playlist name is required' });
+  try {
+    const playlist = await createPlaylistDb(req.user.id, { name: name.trim(), description, cover });
+    for (const song of songs) {
+      await addSongToPlaylistDb(playlist.id, song);
+    }
+    res.status(201).json({ playlist: { ...playlist, songs } });
+  } catch (err) {
+    console.error('Save imported playlist to DB error:', err);
+    res.status(500).json({ error: 'Failed to save imported playlist to database' });
+  }
+});
+
 // Track listening event for algorithmic taste refinement
 app.post('/api/user/listen-event', optionalAuth, async (req, res) => {
   const { song, completed = false, skippedEarly = false } = req.body;
@@ -737,11 +975,14 @@ app.get('*', (req, res) => {
 // Initialize database before starting server
 initDatabase().then(() => {
   refreshTodayTopHitsChart();
+  refreshGlobalTopHitsChart();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🎵 Suno Music Server listening on http://localhost:${PORT}`);
   });
 }).catch(err => {
   console.error('Database startup error:', err);
+  refreshTodayTopHitsChart();
+  refreshGlobalTopHitsChart();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🎵 Suno Music Server listening on http://localhost:${PORT}`);
   });

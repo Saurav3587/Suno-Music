@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sparkles, Flame, Music2, Play, RotateCcw, ArrowDown, Heart } from 'lucide-react';
+import { Sparkles, Flame, Music2, Play, RotateCcw, ArrowDown, Heart, Globe, Download } from 'lucide-react';
 import SongCard from '../components/SongCard';
 import SongRow from '../components/SongRow';
 import SpotifyPlaylistsSection from '../components/SpotifyPlaylistsSection';
-import SpotifyPlaylistModal from '../components/SpotifyPlaylistModal';
 import { useUser } from '../context/UserContext';
 import { useMusic } from '../context/MusicContext';
 
@@ -16,9 +15,10 @@ const SpotifyIcon = ({ size = 16, color = '#1db954' }) => (
   </svg>
 );
 
-export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPlaylist }) {
+export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPlaylist, onSearchArtist, onNavigateTab, onOpenImport }) {
   const { userName, userAvatar, currentUser, playlists = [] } = useUser();
-  const { recentSongs = [], playSong, likedSongs = [] } = useMusic();
+  const { recentSongs = [], playSong, likedSongs = [], openPlaylist } = useMusic();
+  const handlePlaylistClick = onOpenPlaylist || openPlaylist;
 
   // Combine Liked Songs + user playlists for the home shelf
   const safePlaylists = Array.isArray(playlists) ? playlists : [];
@@ -33,12 +33,10 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
   const [trendingSongs, setTrendingSongs] = useState([]);
   const [acousticSongs, setAcousticSongs] = useState([]);
   const [spotifySongs, setSpotifySongs] = useState([]);
-  const [selectedSpotifyPlaylist, setSelectedSpotifyPlaylist] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Suggested For You state (dynamically refreshable from user suggestions & taste)
   const [suggestedSongs, setSuggestedSongs] = useState([]);
-  const [suggestedSubtitle, setSuggestedSubtitle] = useState('Personalized for you');
   const [suggestedLoading, setSuggestedLoading] = useState(false);
   const seedIndexRef = useRef(0);
 
@@ -228,14 +226,6 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
       }
 
       setSuggestedSongs(mixed.slice(0, 16));
-
-      // Subtitle: "Artist • Mood & more" or just mood
-      const leadArtist = topArtists[0] || '';
-      setSuggestedSubtitle(
-        leadArtist
-          ? `${leadArtist} · ${activeMood.mood} & more`
-          : `${activeMood.mood} picks for you`
-      );
     } catch (err) {
       console.error('Failed to load suggestions:', err);
     } finally {
@@ -312,14 +302,71 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
           </div>
         </div>
 
-        {/* Pull-to-refresh hint shown when user starts dragging */}
-        {isPulling && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.72rem', color: 'var(--accent-rose-light)', opacity: pullProgress / 100 }}>
-            <ArrowDown size={12} style={{ transform: `rotate(${pullProgress * 1.8}deg)`, transition: 'transform 0.1s' }} />
-            <span>{pullProgress >= 100 ? 'Release to refresh' : 'Pull to refresh'}</span>
-          </div>
-        )}
+        {/* Right Corner: Pull-to-refresh hint or Import Playlist Button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {isPulling ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.72rem', color: 'var(--accent-rose-light)', opacity: pullProgress / 100 }}>
+              <ArrowDown size={12} style={{ transform: `rotate(${pullProgress * 1.8}deg)`, transition: 'transform 0.1s' }} />
+              <span>{pullProgress >= 100 ? 'Release' : 'Pull'}</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenImport}
+              className="header-import-btn"
+              title="Import Playlist via URL"
+            >
+              <Download size={13} color="#ff758c" />
+              <span>Import</span>
+            </button>
+          )}
+        </div>
       </header>
+
+      {/* Featured Translucent Liquid Glass Block: Daily Sonic Vibe */}
+      <div
+        className="translucent-glass-banner"
+        onClick={() => {
+          if (suggestedSongs.length > 0) {
+            playSong(suggestedSongs[0], suggestedSongs);
+          } else if (onNavigateTab) {
+            onNavigateTab('foryou');
+          }
+        }}
+      >
+        <div className="translucent-glass-banner-glow" />
+        <div className="translucent-glass-banner-content">
+          <div className="translucent-glass-banner-badge">
+            <Sparkles size={12} color="#ff758c" />
+            <span>AI Smart Flow</span>
+          </div>
+          <h2 className="translucent-glass-banner-title">
+            Your Daily Sonic Vibe
+          </h2>
+          <p className="translucent-glass-banner-subtitle">
+            Curated lossless acoustics & trending charts tailored for you
+          </p>
+          <div className="translucent-glass-banner-btn-row">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (suggestedSongs.length > 0) playSong(suggestedSongs[0], suggestedSongs);
+              }}
+              className="translucent-glass-play-btn"
+            >
+              <Play size={13} fill="#ffffff" strokeWidth={0} />
+              <span>Listen Now</span>
+            </button>
+            <div className="translucent-glass-wave">
+              <div className="eq-bar" />
+              <div className="eq-bar" />
+              <div className="eq-bar" />
+              <div className="eq-bar" />
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* ── Suggested For You Shelf ── */}
       <div style={{ marginBottom: '10px' }}>
@@ -329,23 +376,16 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
             <span>Suggested For You</span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="section-subtitle" style={{ color: 'var(--accent-rose-light)' }}>
-              {suggestedLoading ? 'Refreshing…' : suggestedSubtitle}
-            </span>
-
-            {/* Play All — only button left in the header */}
-            {suggestedSongs.length > 0 && !suggestedLoading && (
-              <button
-                onClick={() => playSong(suggestedSongs[0], suggestedSongs)}
-                title="Play all suggested songs"
-                className="shelf-action-btn"
-              >
-                <Play size={10} fill="#ffffff" strokeWidth={0} />
-                <span>Play All</span>
-              </button>
-            )}
-          </div>
+          {suggestedSongs.length > 0 && !suggestedLoading && (
+            <button
+              onClick={() => playSong(suggestedSongs[0], suggestedSongs)}
+              title="Play all suggested songs"
+              className="shelf-action-btn"
+            >
+              <Play size={10} fill="#ffffff" strokeWidth={0} />
+              <span>Play All</span>
+            </button>
+          )}
         </div>
 
         <div className="horizontal-scroll-row">
@@ -365,6 +405,7 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
                 key={`suggested-${song.id}-${i}`}
                 song={song}
                 playlist={suggestedSongs}
+                onSearchArtist={onSearchArtist}
               />
             ))
           )}
@@ -379,39 +420,39 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
               <RotateCcw size={17} color="#ff3b68" />
               <span>Jump Back In</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span className="section-subtitle" style={{ color: 'var(--accent-rose-light)' }}>
-                {recentSongs.length} {recentSongs.length === 1 ? 'Track' : 'Tracks'} • Listened 45s+
-              </span>
-              <button
-                onClick={() => playSong(recentSongs[0], recentSongs)}
-                title="Play all recent songs"
-                style={{
-                  background: 'linear-gradient(135deg, rgba(255, 59, 104, 0.22) 0%, rgba(162, 56, 255, 0.25) 100%)',
-                  border: '1px solid rgba(255, 75, 114, 0.35)',
-                  color: '#ffffff',
-                  borderRadius: '100px',
-                  padding: '3px 10px',
-                  fontSize: '0.72rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
-                onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
-              >
-                <Play size={11} fill="#ffffff" strokeWidth={0} />
-                <span>Play All</span>
-              </button>
-            </div>
+            <button
+              onClick={() => playSong(recentSongs[0], recentSongs)}
+              title="Play all recent songs"
+              style={{
+                background: 'linear-gradient(135deg, rgba(255, 59, 104, 0.22) 0%, rgba(162, 56, 255, 0.25) 100%)',
+                border: '1px solid rgba(255, 75, 114, 0.35)',
+                color: '#ffffff',
+                borderRadius: '100px',
+                padding: '3px 10px',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
+              onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+            >
+              <Play size={11} fill="#ffffff" strokeWidth={0} />
+              <span>Play All</span>
+            </button>
           </div>
 
           <div className="horizontal-scroll-row">
             {recentSongs.map((song, i) => (
-              <SongCard key={`recent-${song.id}-${i}`} song={song} playlist={recentSongs} />
+              <SongCard
+                key={`recent-${song.id}-${i}`}
+                song={song}
+                playlist={recentSongs}
+                onSearchArtist={onSearchArtist}
+              />
             ))}
           </div>
         </div>
@@ -425,9 +466,9 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
               <Music2 size={17} color="#ff3b68" />
               <span>Your Playlists</span>
             </div>
-            {onOpenPlaylist && (
+            {(onOpenPlaylist || onNavigateTab) && (
               <button
-                onClick={() => onOpenPlaylist(null)}
+                onClick={() => onNavigateTab ? onNavigateTab('library') : onOpenPlaylist(null)}
                 style={{
                   background: 'none', border: 'none', color: 'var(--text-tertiary)',
                   fontSize: '0.76rem', fontWeight: 600, cursor: 'pointer',
@@ -447,7 +488,7 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
                 <div
                   key={pl.id}
                   className="home-playlist-card"
-                  onClick={() => onOpenPlaylist && onOpenPlaylist(pl.id)}
+                  onClick={() => handlePlaylistClick({ ...pl, isUserPlaylist: !pl.isLiked, isLiked: Boolean(pl.isLiked) })}
                 >
                   <div className="home-playlist-cover">
                     {pl.isLiked ? (
@@ -482,17 +523,14 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
       )}
 
       {/* Official Spotify Playlists Showcase (24 Verified Flagship Playlists) */}
-      <SpotifyPlaylistsSection onSelectPlaylist={setSelectedSpotifyPlaylist} />
+      <SpotifyPlaylistsSection onSelectPlaylist={playlist => handlePlaylistClick(playlist)} />
 
-      {/* Spotify Today's Top Hits Tracks (24-Hour Most Listened • 6-Hour Cycle) */}
+      {/* Spotify Today's Top Hits Tracks */}
       <div className="section-header" style={{ marginTop: '8px' }}>
         <div className="section-title">
           <SpotifyIcon size={18} />
           <span>Today's Top Hits</span>
         </div>
-        <span className="section-subtitle" style={{ color: '#1db954', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span>🇮🇳 India Top 50 (24h) • Auto-updates every 6h</span>
-        </span>
       </div>
 
       <div className="horizontal-scroll-row">
@@ -508,7 +546,12 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
           ))
         ) : (
           (spotifySongs.length > 0 ? spotifySongs : forYouSongs.slice(0, 10)).map((song, i) => (
-            <SongCard key={`spotify-${song.id}-${i}`} song={song} playlist={spotifySongs.length > 0 ? spotifySongs : forYouSongs} />
+            <SongCard
+              key={`spotify-${song.id}-${i}`}
+              song={song}
+              playlist={spotifySongs.length > 0 ? spotifySongs : forYouSongs}
+              onSearchArtist={onSearchArtist}
+            />
           ))
         )}
       </div>
@@ -516,48 +559,128 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
       {/* Top Global Hits */}
       <div className="section-header" style={{ marginTop: '8px' }}>
         <div className="section-title">
-          <Flame size={18} color="#f8c291" />
+          <Globe size={18} color="#00d2d3" />
           <span>Top Global Hits</span>
         </div>
-        <span className="section-subtitle">Trending Charts</span>
       </div>
 
       <div className="horizontal-scroll-row">
-        {trendingSongs.slice(0, 10).map((song, i) => (
-          <SongCard key={`trend-${song.id}-${i}`} song={song} playlist={trendingSongs} />
-        ))}
+        {loading && trendingSongs.length === 0 ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="song-card" style={{ opacity: 0.5 }}>
+              <div className="card-image-wrap" style={{ background: 'rgba(255, 255, 255, 0.06)' }} />
+              <div className="card-info">
+                <div style={{ height: '14px', width: '80%', background: 'rgba(255, 255, 255, 0.07)', borderRadius: '4px', marginBottom: '6px' }} />
+                <div style={{ height: '11px', width: '55%', background: 'rgba(255, 255, 255, 0.04)', borderRadius: '4px' }} />
+              </div>
+            </div>
+          ))
+        ) : (
+          trendingSongs.slice(0, 15).map((song, i) => (
+            <SongCard
+              key={`trend-${song.id}-${i}`}
+              song={song}
+              playlist={trendingSongs}
+              onSearchArtist={onSearchArtist}
+            />
+          ))
+        )}
       </div>
 
-      {/* Essential Melodies & Acoustics */}
-      <div className="section-header" style={{ marginTop: '12px' }}>
+      {/* Essential Melodies & Acoustics — Song by Song Translucent Glass Blocks */}
+      <div className="section-header" style={{ marginTop: '8px', marginBottom: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div className="section-title">
           <Music2 size={18} color="#ff3b68" />
           <span>Timeless Melodies & Acoustics</span>
         </div>
-        <span className="section-subtitle">{acousticSongs.length} Tracks</span>
+
+        {acousticSongs.length > 0 && (
+          <button
+            onClick={() => playSong(acousticSongs[0], acousticSongs)}
+            className="shelf-action-btn"
+          >
+            <Play size={10} fill="#ffffff" strokeWidth={0} />
+            <span>Play All</span>
+          </button>
+        )}
       </div>
 
-      <div style={{ paddingBottom: '20px' }}>
-        {acousticSongs.slice(0, 12).map((song, i) => (
-          <SongRow
-            key={`acoustic-${song.id}-${i}`}
-            song={song}
-            index={i}
-            playlist={acousticSongs}
-            onAddToPlaylist={onOpenAddToPlaylist}
-          />
-        ))}
+      <div style={{ paddingBottom: '4px' }}>
+        {loading && acousticSongs.length === 0 ? (
+          Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="song-row glass-block" style={{ opacity: 0.4 }}>
+              <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(255, 255, 255, 0.08)' }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ height: '14px', width: '60%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', marginBottom: '6px' }} />
+                <div style={{ height: '11px', width: '40%', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px' }} />
+              </div>
+            </div>
+          ))
+        ) : (
+          acousticSongs.slice(0, 15).map((song, i) => (
+            <SongRow
+              key={`acoustic-${song.id}-${i}`}
+              song={song}
+              index={i}
+              playlist={acousticSongs}
+              onAddToPlaylist={onOpenAddToPlaylist}
+              onSearchArtist={onSearchArtist}
+              isGlass={true}
+            />
+          ))
+        )}
       </div>
 
-      {/* Spotify Playlist Full Modal */}
-      {selectedSpotifyPlaylist && (
-        <SpotifyPlaylistModal
-          playlistKeyOrId={selectedSpotifyPlaylist.key || selectedSpotifyPlaylist.id}
-          initialData={selectedSpotifyPlaylist}
-          onClose={() => setSelectedSpotifyPlaylist(null)}
-          onOpenAddToPlaylist={onOpenAddToPlaylist}
-        />
-      )}
+      {/* Home Footer: Made with Love - Sleek & Compact */}
+      <footer style={{
+        marginTop: '6px',
+        marginBottom: '0px',
+        padding: '6px 12px 2px',
+        textAlign: 'center',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '2px',
+        borderTop: '1px solid rgba(255, 255, 255, 0.07)'
+      }}>
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px',
+          fontSize: '0.78rem',
+          fontWeight: 700,
+          color: '#ffffff',
+          fontFamily: 'var(--font-display)',
+          lineHeight: 1.2
+        }}>
+          <span>Made with</span>
+          <span style={{
+            display: 'inline-flex',
+            animation: 'heartBeat 1.5s ease-in-out infinite',
+            filter: 'drop-shadow(0 0 6px rgba(255, 59, 104, 0.6))',
+            fontSize: '0.82rem'
+          }}>
+            ❤️
+          </span>
+        </div>
+
+        <div style={{
+          fontSize: '0.66rem',
+          color: 'var(--accent-rose-light, #ff758c)',
+          fontWeight: 600,
+          letterSpacing: '0.25px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          lineHeight: 1.2
+        }}>
+          <span>In India, For India</span>
+          <span style={{ fontSize: '0.72rem' }}>🇮🇳</span>
+          <span style={{ opacity: 0.35, margin: '0 2px' }}>•</span>
+          <span style={{ color: 'rgba(255, 255, 255, 0.4)', fontWeight: 500 }}>Suno Music</span>
+        </div>
+      </footer>
     </div>
   );
 }

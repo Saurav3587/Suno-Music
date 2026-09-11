@@ -4,7 +4,7 @@ import { useMusic } from '../context/MusicContext';
 
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=500&auto=format&fit=crop&q=80';
 
-export default function SongCard({ song, playlist = null }) {
+export default function SongCard({ song, playlist = null, onSearchArtist = null }) {
   const { currentTrack, isPlaying, playSong, togglePlay } = useMusic();
   const isCurrent = currentTrack?.id === song.id;
 
@@ -14,6 +14,13 @@ export default function SongCard({ song, playlist = null }) {
       togglePlay();
     } else {
       playSong(song, playlist);
+    }
+  };
+
+  const handleArtistClick = (e) => {
+    if (onSearchArtist && song.artist) {
+      e.stopPropagation();
+      onSearchArtist(song.artist);
     }
   };
 
@@ -64,7 +71,13 @@ export default function SongCard({ song, playlist = null }) {
       </div>
       <div className="card-info">
         <span className="card-title" title={title}>{title}</span>
-        <span className="card-artist" title={artist}>{artist}</span>
+        <span
+          className={`card-artist ${onSearchArtist ? 'artist-clickable' : ''}`}
+          title={artist}
+          onClick={handleArtistClick}
+        >
+          {artist}
+        </span>
       </div>
     </div>
   );

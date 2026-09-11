@@ -9,8 +9,18 @@ export default function Navigation({ activeTab, setActiveTab }) {
     { id: 'library', label: 'Library', icon: Library },
   ];
 
+  const activeIndex = Math.max(0, tabs.findIndex(t => t.id === activeTab));
+
   return (
     <nav className="bottom-navigation">
+      {/* Liquid Sliding Pill Indicator */}
+      <div
+        className="nav-liquid-pill"
+        style={{
+          transform: `translateX(${activeIndex * 100}%)`,
+        }}
+      />
+
       {tabs.map(tab => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;
@@ -21,7 +31,11 @@ export default function Navigation({ activeTab, setActiveTab }) {
             className={`nav-tab ${isActive ? 'active' : ''}`}
             onClick={() => setActiveTab(tab.id)}
           >
-            <Icon size={22} strokeWidth={isActive ? 2.5 : 1.8} color={isActive ? '#ff4b72' : 'currentColor'} />
+            <Icon
+              size={20}
+              strokeWidth={isActive ? 2.4 : 1.7}
+              className={`nav-icon ${isActive ? 'active' : ''}`}
+            />
             <span className="nav-tab-label">{tab.label}</span>
           </button>
         );

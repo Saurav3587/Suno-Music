@@ -148,9 +148,11 @@ export default function AuthScreen() {
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
-      justifyContent: 'center',
-      padding: '24px 16px',
+      justifyContent: 'flex-start',
+      padding: 'calc(16px + var(--safe-top, 0px)) 16px calc(24px + var(--safe-bottom, 0px)) 16px',
       overflowY: 'auto',
+      WebkitOverflowScrolling: 'touch',
+      boxSizing: 'border-box',
       fontFamily: 'var(--font-body, "Plus Jakarta Sans", sans-serif)',
       transition: 'opacity 0.4s ease, transform 0.4s ease',
       opacity: isUnlocking ? 0.9 : 1,
@@ -182,43 +184,43 @@ export default function AuthScreen() {
       {/* Main Glassmorphic Auth Container matching app surfaces */}
       <div style={{
         width: '100%',
-        maxWidth: '440px',
-        background: 'var(--bg-surface, rgba(22, 18, 33, 0.75))',
-        backdropFilter: 'blur(35px)',
-        WebkitBackdropFilter: 'blur(35px)',
-        border: '1px solid var(--border-glow, rgba(255, 75, 114, 0.25))',
-        borderRadius: '28px',
-        padding: '36px 30px',
-        boxShadow: 'var(--shadow-floating, 0 12px 36px rgba(0, 0, 0, 0.6)), 0 0 35px rgba(255, 59, 104, 0.15)',
+        maxWidth: '410px',
+        background: 'rgba(18, 14, 28, 0.84)',
+        backdropFilter: 'var(--backdrop-liquid)',
+        WebkitBackdropFilter: 'var(--backdrop-liquid)',
+        border: '1px solid rgba(255, 255, 255, 0.16)',
+        borderRadius: '26px',
+        padding: '20px 18px',
+        boxShadow: 'inset 0 1px 1.5px rgba(255, 255, 255, 0.32), 0 24px 70px rgba(0, 0, 0, 0.85)',
         position: 'relative',
         zIndex: 2,
-        margin: 'auto'
+        margin: 'auto 0'
       }}>
         {/* Brand Header */}
-        <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '14px' }}>
           {/* App Logo with gradient glow */}
           <div style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '20px',
+            width: '44px',
+            height: '44px',
+            borderRadius: '14px',
             background: 'var(--gradient-romantic, linear-gradient(135deg, #ff3b68 0%, #a238ff 100%))',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 10px 30px rgba(255, 59, 104, 0.45)',
-            marginBottom: '16px'
+            boxShadow: '0 8px 24px rgba(255, 59, 104, 0.45)',
+            marginBottom: '8px'
           }}>
-            <Music2 size={34} color="#ffffff" strokeWidth={2.2} />
+            <Music2 size={22} color="#ffffff" strokeWidth={2.2} />
           </div>
 
           <h1 style={{
             fontFamily: 'var(--font-display, "Outfit", sans-serif)',
-            fontSize: '1.95rem',
+            fontSize: '1.45rem',
             fontWeight: 800,
             color: '#ffffff',
-            letterSpacing: '-0.5px',
-            lineHeight: 1.15,
-            marginBottom: '8px'
+            letterSpacing: '-0.35px',
+            lineHeight: 1.18,
+            marginBottom: '4px'
           }}>
             Millions of songs.<br />
             <span style={{
@@ -231,7 +233,7 @@ export default function AuthScreen() {
           </h1>
 
           <p style={{
-            fontSize: '0.86rem',
+            fontSize: '0.80rem',
             color: 'var(--text-secondary, rgba(255, 255, 255, 0.68))',
             fontWeight: 500,
             display: 'flex',
@@ -240,7 +242,7 @@ export default function AuthScreen() {
             gap: '6px'
           }}>
             <span>Sign up or log in to unlock player</span>
-            <Sparkles size={14} color="var(--accent-rose-light, #ff758c)" />
+            <Sparkles size={12} color="var(--accent-rose-light, #ff758c)" />
           </p>
         </div>
 
@@ -281,7 +283,7 @@ export default function AuthScreen() {
           background: 'rgba(0, 0, 0, 0.45)',
           borderRadius: '16px',
           padding: '4px',
-          marginBottom: '22px',
+          marginBottom: '16px',
           border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
           overflow: 'hidden'
         }}>
@@ -314,11 +316,11 @@ export default function AuthScreen() {
               position: 'relative',
               zIndex: 2,
               flex: 1,
-              padding: '11px 0',
+              padding: '9px 0',
               border: 'none',
               background: 'transparent',
               fontFamily: 'var(--font-display, "Outfit", sans-serif)',
-              fontSize: '0.92rem',
+              fontSize: '0.90rem',
               fontWeight: 700,
               cursor: 'pointer',
               color: activeTab === 'signup' ? '#ffffff' : 'rgba(255, 255, 255, 0.55)',
@@ -341,11 +343,11 @@ export default function AuthScreen() {
               position: 'relative',
               zIndex: 2,
               flex: 1,
-              padding: '11px 0',
+              padding: '9px 0',
               border: 'none',
               background: 'transparent',
               fontFamily: 'var(--font-display, "Outfit", sans-serif)',
-              fontSize: '0.92rem',
+              fontSize: '0.90rem',
               fontWeight: 700,
               cursor: 'pointer',
               color: activeTab === 'login' ? '#ffffff' : 'rgba(255, 255, 255, 0.55)',
@@ -822,8 +824,8 @@ export default function AuthScreen() {
 
         {/* Trust Badges matching app accents */}
         <div style={{
-          marginTop: '26px',
-          paddingTop: '20px',
+          marginTop: '16px',
+          paddingTop: '14px',
           borderTop: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
           display: 'flex',
           justifyContent: 'space-around',

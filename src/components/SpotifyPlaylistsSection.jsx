@@ -85,7 +85,8 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
         display: 'flex',
         gap: '7px',
         overflowX: 'auto',
-        padding: '2px 0 10px 0',
+        margin: '0 -16px',
+        padding: '2px 16px 10px 16px',
         scrollbarWidth: 'none',
         msOverflowStyle: 'none'
       }}>
@@ -113,18 +114,22 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
       </div>
 
       {/* Playlists Horizontal Row */}
-      <div className="horizontal-scroll-row" style={{ paddingTop: '2px', paddingBottom: '8px' }}>
+      <div className="horizontal-scroll-row">
         {loading ? (
           Array.from({ length: 5 }).map((_, i) => (
             <div
               key={i}
               style={{
-                width: '144px',
-                flexShrink: 0,
+                width: '148px',
+                minWidth: '148px',
+                maxWidth: '148px',
+                height: '208px',
+                flex: '0 0 148px',
                 borderRadius: '18px',
                 background: 'rgba(255, 255, 255, 0.04)',
                 padding: '10px',
-                opacity: 0.5
+                opacity: 0.5,
+                boxSizing: 'border-box'
               }}
             >
               <div style={{ width: '100%', aspectRatio: '1/1', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.08)', marginBottom: '8px' }} />
@@ -139,24 +144,38 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
               onClick={() => onSelectPlaylist && onSelectPlaylist(pl)}
               style={{
                 width: '148px',
-                flexShrink: 0,
+                minWidth: '148px',
+                maxWidth: '148px',
+                height: '208px',
+                minHeight: '208px',
+                maxHeight: '208px',
+                flex: '0 0 148px',
+                boxSizing: 'border-box',
+                scrollSnapAlign: 'start',
                 cursor: 'pointer',
-                borderRadius: '18px',
-                background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%)',
-                border: '1px solid rgba(255, 255, 255, 0.07)',
+                borderRadius: '22px',
+                background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.02) 100%)',
+                backdropFilter: 'blur(20px) saturate(190%)',
+                WebkitBackdropFilter: 'blur(20px) saturate(190%)',
+                border: '1px solid rgba(255, 255, 255, 0.14)',
+                boxShadow: 'inset 0 1.5px 1.5px 0 rgba(255, 255, 255, 0.28), inset 0 -1px 1px 0 rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.45)',
                 padding: '10px',
                 position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-start',
+                overflow: 'hidden',
                 transition: 'transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease, border-color 0.22s ease'
               }}
               onMouseEnter={e => {
-                e.currentTarget.style.transform = 'translateY(-4px)';
-                e.currentTarget.style.borderColor = 'rgba(29, 185, 84, 0.4)';
-                e.currentTarget.style.boxShadow = '0 10px 24px rgba(0, 0, 0, 0.5), 0 0 16px rgba(29, 185, 84, 0.2)';
+                e.currentTarget.style.transform = 'translateY(-3px) scale(1.02)';
+                e.currentTarget.style.borderColor = 'rgba(29, 185, 84, 0.45)';
+                e.currentTarget.style.boxShadow = 'inset 0 1.5px 1.5px rgba(255, 255, 255, 0.4), 0 16px 36px rgba(0, 0, 0, 0.65), 0 0 24px rgba(29, 185, 84, 0.25)';
               }}
               onMouseLeave={e => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
-                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.transform = 'translateY(0) scale(1)';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.14)';
+                e.currentTarget.style.boxShadow = 'inset 0 1.5px 1.5px 0 rgba(255, 255, 255, 0.28), inset 0 -1px 1px 0 rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.45)';
               }}
             >
               {/* Cover Image Wrap */}
@@ -164,11 +183,12 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
                 position: 'relative',
                 width: '100%',
                 aspectRatio: '1/1',
-                borderRadius: '12px',
+                borderRadius: '15px',
                 overflow: 'hidden',
-                boxShadow: '0 6px 16px rgba(0, 0, 0, 0.5)',
+                border: '1px solid rgba(255, 255, 255, 0.16)',
+                boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.25), 0 6px 16px rgba(0, 0, 0, 0.5)',
                 background: '#151120',
-                marginBottom: '10px'
+                marginBottom: '8px'
               }}>
                 <img
                   src={pl.cover}

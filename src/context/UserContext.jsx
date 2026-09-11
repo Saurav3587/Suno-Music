@@ -397,6 +397,52 @@ export function UserProvider({ children }) {
     }));
   };
 
+  const importPlaylistToLibrary = async (importedData) => {
+    if (!importedData || !importedData.name) return null;
+    const localId = `pl_${Date.now()}`;
+    const newPl = {
+      id: localId,
+      name: importedData.name.trim(),
+      description: importedData.description || 'Imported Playlist',
+      cover: importedData.cover || (importedData.songs?.[0]?.image) || 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&auto=format&fit=crop&q=80',
+      createdAt: new Date().toLocaleDateString(),
+      badge: importedData.badge || 'Imported',
+      songs: importedData.songs || []
+    };
+
+    setPlaylists(prev => [newPl, ...prev]);
+
+    // If logged in, persist atomically directly to MySQL database
+    if (authToken) {
+      try {
+        const res = await fetch('/api/user/playlist/import-save', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({
+            name: newPl.name,
+            description: newPl.description,
+            cover: newPl.cover,
+            songs: newPl.songs
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.playlist?.id) {
+            setPlaylists(prev => prev.map(p => p.id === localId ? { ...p, id: data.playlist.id } : p));
+            return { ...newPl, id: data.playlist.id };
+          }
+        }
+      } catch (e) {
+        console.warn('Database import sync warning:', e.message);
+      }
+    }
+
+    return newPl;
+  };
+
   return (
     <UserContext.Provider value={{
       // Auth State & Actions
@@ -422,6 +468,7 @@ export function UserProvider({ children }) {
       deletePlaylist,
       addSongToPlaylist,
       removeSongFromPlaylist,
+      importPlaylistToLibrary,
 
       // Sleep Timer
       sleepTimerRemaining,

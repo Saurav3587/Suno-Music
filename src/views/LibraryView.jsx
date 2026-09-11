@@ -197,34 +197,42 @@ function PlaylistDetail({ playlist, isLiked, onBack, onOpenAddToPlaylist, userNa
 }
 
 /* ─── Main LibraryView ─── */
-export default function LibraryView({ onOpenAddToPlaylist, onOpenPlaylistId }) {
+export default function LibraryView({
+  onOpenAddToPlaylist,
+  onOpenPlaylistId,
+  onClearPendingPlaylistId,
+  onOpenPlaylist = null,
+  onSearchArtist = null
+}) {
   const { playlists = [], deletePlaylist, createPlaylist, userName } = useUser();
-  const { likedSongs = [], recentSongs = [], playSong } = useMusic();
+  const { likedSongs = [], recentSongs = [], playSong, openPlaylist: globalOpenPlaylist } = useMusic();
+  const handleSelectPlaylist = onOpenPlaylist || globalOpenPlaylist;
 
   const [activeFilter, setActiveFilter] = useState('all');
-  const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-
-  // Auto-open a playlist by ID (for deep-link from Home)
-  React.useEffect(() => {
-    if (onOpenPlaylistId) {
-      if (onOpenPlaylistId === '__liked__') {
-        setSelectedPlaylist({ id: '__liked__', name: 'Liked Songs', songs: likedSongs });
-      } else {
-        const pl = playlists.find(p => p.id === onOpenPlaylistId);
-        if (pl) setSelectedPlaylist(pl);
-      }
-    }
-  }, [onOpenPlaylistId]);
 
   /* Virtual "Liked Songs" playlist always pinned at top */
   const likedPlaylist = useMemo(() => ({
     id: '__liked__',
     name: 'Liked Songs',
     songs: likedSongs,
+    isLiked: true,
     cover: null
   }), [likedSongs]);
+
+  // Auto-open a playlist by ID (for deep-link from Home)
+  React.useEffect(() => {
+    if (onOpenPlaylistId) {
+      if (onOpenPlaylistId === '__liked__') {
+        handleSelectPlaylist(likedPlaylist);
+      } else {
+        const pl = playlists.find(p => p.id === onOpenPlaylistId);
+        if (pl) handleSelectPlaylist({ ...pl, isUserPlaylist: true });
+      }
+      if (onClearPendingPlaylistId) onClearPendingPlaylistId();
+    }
+  }, [onOpenPlaylistId, playlists, likedPlaylist]);
 
   const handleCreatePlaylist = (e) => {
     e.preventDefault();
@@ -235,13 +243,12 @@ export default function LibraryView({ onOpenAddToPlaylist, onOpenPlaylistId }) {
     }
   };
 
-  const openPlaylist = (pl) => {
-    // Always pull fresh songs for user playlists
+  const handleOpenPlaylist = (pl) => {
     if (pl.id === '__liked__') {
-      setSelectedPlaylist({ ...likedPlaylist });
+      handleSelectPlaylist(likedPlaylist);
     } else {
       const fresh = playlists.find(p => p.id === pl.id) || pl;
-      setSelectedPlaylist(fresh);
+      handleSelectPlaylist({ ...fresh, isUserPlaylist: true });
     }
   };
 
@@ -257,24 +264,6 @@ export default function LibraryView({ onOpenAddToPlaylist, onOpenPlaylistId }) {
     if (activeFilter === 'history') return [];
     return playlists;
   }, [playlists, activeFilter]);
-
-  /* ── Detail view ── */
-  if (selectedPlaylist) {
-    const isLikedPl = selectedPlaylist.id === '__liked__';
-    const freshData = isLikedPl
-      ? { ...likedPlaylist }
-      : (playlists.find(p => p.id === selectedPlaylist.id) || selectedPlaylist);
-
-    return (
-      <PlaylistDetail
-        playlist={freshData}
-        isLiked={isLikedPl}
-        onBack={() => setSelectedPlaylist(null)}
-        onOpenAddToPlaylist={onOpenAddToPlaylist}
-        userName={userName}
-      />
-    );
-  }
 
   return (
     <div>
@@ -342,7 +331,7 @@ export default function LibraryView({ onOpenAddToPlaylist, onOpenPlaylistId }) {
           {/* Liked Songs — always pinned first */}
           <div
             className="playlist-card liked-songs-card"
-            onClick={() => openPlaylist(likedPlaylist)}
+            onClick={() => handleOpenPlaylist(likedPlaylist)}
           >
             <LikedCover songs={likedSongs} />
             <button
@@ -364,7 +353,7 @@ export default function LibraryView({ onOpenAddToPlaylist, onOpenPlaylistId }) {
               <div
                 key={pl.id}
                 className="playlist-card"
-                onClick={() => openPlaylist(pl)}
+                onClick={() => handleOpenPlaylist(pl)}
               >
                 {/* Cover */}
                 {imgs.length >= 4 ? (

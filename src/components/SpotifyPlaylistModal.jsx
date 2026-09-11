@@ -13,6 +13,16 @@ function SpotifyIcon({ size = 18, color = '#1db954' }) {
   );
 }
 
+// YouTube official SVG Icon
+function YoutubeIcon({ size = 18, color = '#ff0000' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+      <path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17" fill={color} />
+      <polygon points="10 15 15 12 10 9" fill="#ffffff" />
+    </svg>
+  );
+}
+
 export default function SpotifyPlaylistModal({ playlistKeyOrId, initialData, onClose, onOpenAddToPlaylist }) {
   const { playSong } = useMusic();
   const { createPlaylist, addSongToPlaylist } = useUser();
@@ -142,10 +152,28 @@ export default function SpotifyPlaylistModal({ playlistKeyOrId, initialData, onC
           borderBottom: '1px solid rgba(255, 255, 255, 0.06)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <SpotifyIcon size={20} />
-            <span style={{ fontSize: '0.86rem', fontWeight: 800, letterSpacing: '0.5px', color: '#1db954', textTransform: 'uppercase' }}>
-              Spotify Official
-            </span>
+            {playlist?.source === 'youtube' ? (
+              <>
+                <YoutubeIcon size={20} color="#ff0000" />
+                <span style={{ fontSize: '0.86rem', fontWeight: 800, letterSpacing: '0.5px', color: '#ff4d4d', textTransform: 'uppercase' }}>
+                  YouTube Music Playlist
+                </span>
+              </>
+            ) : playlist?.source === 'saavn' ? (
+              <>
+                <Sparkles size={18} color="#ff85a2" />
+                <span style={{ fontSize: '0.86rem', fontWeight: 800, letterSpacing: '0.5px', color: '#ff85a2', textTransform: 'uppercase' }}>
+                  Studio 320k Curated
+                </span>
+              </>
+            ) : (
+              <>
+                <SpotifyIcon size={20} />
+                <span style={{ fontSize: '0.86rem', fontWeight: 800, letterSpacing: '0.5px', color: '#1db954', textTransform: 'uppercase' }}>
+                  Spotify Official
+                </span>
+              </>
+            )}
           </div>
           <button
             onClick={onClose}
