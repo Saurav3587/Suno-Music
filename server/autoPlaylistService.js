@@ -1,3 +1,4 @@
+import yts from 'yt-search';
 import { normalizeSong } from './decrypt.js';
 import { deduplicateTrackList } from './dedupService.js';
 
@@ -11,14 +12,25 @@ async function fetchJioSaavn(params) {
   params.ctx = 'web6dot0';
 
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const res = await fetch(url.toString(), {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      'Accept': 'application/json'
-    }
-  });
-  if (!res.ok) throw new Error(`JioSaavn fetch failed: ${res.status}`);
-  return await res.json();
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+
+  try {
+    const res = await fetch(url.toString(), {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cookie': 'L=hindi; gdpr_acceptance=true; DL=english'
+      }
+    });
+    if (!res.ok) throw new Error(`JioSaavn fetch failed: ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const EXCLUDE_REMIX_REGEX = /(slowed|reverb|speed\s*up|sped\s*up|nightcore|bass\s*boost|8d\s*audio|remix|mash\s*up|mashup|non\s*stop|tiktok|ringtone|dj\s*mix|extended\s*mix|club\s*mix|status|whatsapp)/i;
@@ -29,24 +41,54 @@ export function isCleanTrack(song) {
 }
 
 /**
- * Searches songs by query string
+ * Searches songs by query string.
+ * Uses JioSaavn first for 320kbps audio, seamlessly falls back to YouTube if unavailable.
  */
 export async function searchSongs(query, limit = 20) {
   if (!query || !query.trim()) return [];
+  const cleanQ = query.trim();
+
+  // 1. Try JioSaavn 320kbps
   try {
     const data = await fetchJioSaavn({
       __call: 'search.getResults',
-      q: query.trim(),
+      q: cleanQ,
       n: limit.toString(),
       p: '1'
     });
     const rawList = data.results || [];
     const normalized = rawList
       .map(normalizeSong)
-      .filter(s => s && s.streamUrl);
-    return deduplicateTrackList(normalized, { maxCount: limit });
+      .filter(s => s && s.streamUrl && isCleanTrack(s));
+    if (normalized.length > 0) {
+      return deduplicateTrackList(normalized, { maxCount: limit });
+    }
   } catch (err) {
-    console.error('searchSongs error:', err.message);
+    // JioSaavn timed out, rate-limited, or blocked from cloud IP — fall back to YouTube
+  }
+
+  // 2. Seamless YouTube Search Fallback
+  try {
+    const searchRes = await yts(cleanQ);
+    const cleanVideos = (searchRes?.videos || [])
+      .filter(v => v && v.title && isCleanTrack(v))
+      .slice(0, limit)
+      .map(v => ({
+        id: `yt_${v.videoId}`,
+        youtubeId: v.videoId,
+        source: 'youtube',
+        isAcoustic: /(acoustic|unplugged)/i.test(v.title),
+        title: (v.title || '').replace(/&quot;/g, '"').replace(/&#039;/g, "'"),
+        artist: v.author?.name || 'Artist',
+        album: 'YouTube Music',
+        duration: v.seconds || 0,
+        image: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+        streamUrl: null
+      }));
+
+    return deduplicateTrackList(cleanVideos, { maxCount: limit });
+  } catch (ytErr) {
+    console.error('YouTube search fallback error:', ytErr.message);
     return [];
   }
 }

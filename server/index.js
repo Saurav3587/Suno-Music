@@ -1,3 +1,8 @@
+import dns from 'node:dns';
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch (_) {}
+
 import express from 'express';
 import cors from 'cors';
 import yts from 'yt-search';
