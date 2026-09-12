@@ -87,6 +87,7 @@ export function MusicProvider({ children }) {
   const accumulatedListenSecondsRef = useRef(0);
   const recordedTrackIdRef = useRef(null);
   const lastSavedTimeRef = useRef(0);
+  const skippedArtistsRef = useRef([]);
 
   // Persistent refs to always provide latest values to native event listeners & background callbacks
   const queueRef = useRef(queue);
