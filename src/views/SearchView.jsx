@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Music, Sparkles, Flame, ListMusic, Play, Compass, Layers, Clock } from 'lucide-react';
+import { Search, X, Music, Sparkles, Flame, ListMusic, Play, Compass, Layers, Clock, Mic, MicOff } from 'lucide-react';
 import SongRow from '../components/SongRow';
 import SpotifyPlaylistsSection from '../components/SpotifyPlaylistsSection';
 import { useMusic } from '../context/MusicContext';
@@ -98,8 +98,92 @@ export default function SearchView({
   const [playlists, setPlaylists] = useState([]);
   const [activeTab, setActiveTab] = useState('all'); // 'all' | 'songs' | 'playlists'
   const [loading, setLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceError, setVoiceError] = useState(null);
   const debounceRef = useRef(null);
   const inputRef = useRef(null);
+  const recognitionRef = useRef(null);
+
+  // Clean up speech recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (_) {}
+      }
+    };
+  }, []);
+
+  // Voice Search Handler using Web Speech API
+  const handleVoiceSearch = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setVoiceError('Voice search is not supported on this browser/device.');
+      setTimeout(() => setVoiceError(null), 3500);
+      return;
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (_) {}
+      }
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (_) {}
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setVoiceError(null);
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map((r) => r[0].transcript)
+          .join('');
+        setQuery(transcript);
+        if (event.results[0] && event.results[0].isFinal) {
+          addToHistory(transcript);
+          performSearch(transcript);
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.warn('Voice search error:', event.error);
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          setVoiceError(`Voice search: ${event.error}`);
+          setTimeout(() => setVoiceError(null), 3000);
+        }
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      console.error('Failed to start voice search:', err);
+      setVoiceError('Could not start microphone. Check permissions.');
+      setIsListening(false);
+      setTimeout(() => setVoiceError(null), 3000);
+    }
+  };
 
   // Search History State from LocalStorage
   const [searchHistory, setSearchHistory] = useState(() => {
@@ -332,22 +416,137 @@ export default function SearchView({
             autoComplete="off"
             autoCorrect="off"
             spellCheck="false"
+            style={{ paddingRight: query ? '82px' : '50px' }}
           />
-          {query && (
+
+          <div
+            style={{
+              position: 'absolute',
+              right: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              zIndex: 10,
+            }}
+          >
+            {query && (
+              <button
+                type="button"
+                className="search-clear-btn"
+                style={{ position: 'static' }}
+                onClick={clearSearch}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  clearSearch(e);
+                }}
+                aria-label="Clear search"
+              >
+                <X size={15} />
+              </button>
+            )}
+
             <button
               type="button"
-              className="search-clear-btn"
-              onClick={clearSearch}
-              onTouchEnd={(e) => {
-                e.preventDefault();
-                clearSearch(e);
+              onClick={handleVoiceSearch}
+              className={`search-voice-btn ${isListening ? 'listening' : ''}`}
+              title={isListening ? 'Listening... Tap to stop' : 'Search with voice'}
+              aria-label="Search with voice"
+              style={{
+                width: '30px',
+                height: '30px',
+                borderRadius: '50%',
+                border: isListening ? '1px solid #ff2e93' : '1px solid rgba(255, 255, 255, 0.15)',
+                background: isListening
+                  ? 'linear-gradient(135deg, #ff2e93 0%, #a238ff 100%)'
+                  : 'rgba(255, 255, 255, 0.08)',
+                color: isListening ? '#ffffff' : 'rgba(255, 255, 255, 0.8)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 0,
+                transition: 'all 0.2s ease',
+                boxShadow: isListening ? '0 0 16px rgba(255, 46, 147, 0.7)' : 'none',
+                WebkitTapHighlightColor: 'transparent',
               }}
-              aria-label="Clear search"
             >
-              <X size={15} />
+              {isListening ? <MicOff size={15} /> : <Mic size={15} />}
             </button>
-          )}
+          </div>
         </div>
+
+        {/* Live Voice Search Listening Bar */}
+        {isListening && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginTop: '10px',
+              padding: '10px 16px',
+              borderRadius: '14px',
+              background: 'linear-gradient(135deg, rgba(255, 46, 147, 0.18) 0%, rgba(162, 56, 255, 0.18) 100%)',
+              border: '1px solid rgba(255, 46, 147, 0.4)',
+              color: '#ffffff',
+              fontSize: '0.82rem',
+              animation: 'fadeIn 0.2s ease',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: '9px',
+                  height: '9px',
+                  borderRadius: '50%',
+                  background: '#ff2e93',
+                  boxShadow: '0 0 10px #ff2e93',
+                }}
+              />
+              <span style={{ fontWeight: 600 }}>Listening... Speak song or artist name</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (recognitionRef.current) {
+                  try {
+                    recognitionRef.current.stop();
+                  } catch (_) {}
+                }
+                setIsListening(false);
+              }}
+              style={{
+                background: 'rgba(255, 255, 255, 0.12)',
+                border: 'none',
+                color: '#ffffff',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {/* Voice Search Error Notice */}
+        {voiceError && (
+          <div
+            style={{
+              marginTop: '8px',
+              padding: '8px 14px',
+              borderRadius: '10px',
+              background: 'rgba(255, 59, 48, 0.15)',
+              border: '1px solid rgba(255, 59, 48, 0.3)',
+              color: '#ff6b6b',
+              fontSize: '0.78rem',
+            }}
+          >
+            ⚠️ {voiceError}
+          </div>
+        )}
       </form>
 
       {/* Smart Filter Tabs */}

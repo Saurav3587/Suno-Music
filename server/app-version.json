@@ -1,7 +1,7 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "minVersion": "1.0.0",
-  "releaseNotes": "• Native in-app updater (installs updates completely inside app)\n• Fixed update notification loop\n• Bug fixes and playback performance enhancements",
+  "releaseNotes": "• Added Voice Search feature in Search section\n• Fixed AI DJ opening keyboard automatically\n• Seamless in-app APK updater with install permission prompt",
   "forceUpdate": false,
   "apkUrl": "/api/update/apk"
 }

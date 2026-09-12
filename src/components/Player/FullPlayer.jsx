@@ -726,12 +726,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
       <div className="player-footer-tools">
         <button
           className={`tool-chip ${showAiChat ? 'active' : ''}`}
-          onClick={() => {
-            setShowAiChat(!showAiChat);
-            if (!showAiChat) {
-              setTimeout(() => chatInputRef.current?.focus(), 100);
-            }
-          }}
+          onClick={() => setShowAiChat(!showAiChat)}
           style={{
             borderColor: showAiChat ? 'rgba(162, 56, 255, 0.55)' : undefined,
             color: showAiChat ? '#d1b8ff' : undefined,
