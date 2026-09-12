@@ -18,7 +18,7 @@ export default defineConfig({
     host: true, // Allow access from local network / mobile devices
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'http://127.0.0.1:3001',
         changeOrigin: true
       }
     }

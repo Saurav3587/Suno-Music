@@ -1,6 +1,7 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minVersion": "1.0.0",
-  "releaseNotes": "Initial release � enjoy Suno Music! ??",
-  "forceUpdate": false
+  "releaseNotes": "• Fixed offline search issue when laptop is closed\n• Supercharged cloud fallback with instant streaming and search\n• Faster app load and resilient playback",
+  "forceUpdate": false,
+  "apkUrl": "/api/update/apk"
 }

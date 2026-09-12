@@ -1017,35 +1017,6 @@ app.post('/api/ai/chat', async (req, res) => {
   }
 });
 
-const distPath = path.resolve(__dirname, '../dist');
-
-
-// Serve built frontend statically
-app.use(express.static(distPath));
-
-app.get('*', (req, res) => {
-  if (req.path.startsWith('/api')) {
-    return res.status(404).json({ error: 'Endpoint not found' });
-  }
-  res.sendFile(path.join(distPath, 'index.html'));
-});
-
-// Initialize database before starting server
-initDatabase().then(() => {
-  refreshTodayTopHitsChart();
-  refreshGlobalTopHitsChart();
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🎵 Suno Music Server listening on http://localhost:${PORT}`);
-  });
-}).catch(err => {
-  console.error('Database startup error:', err);
-  refreshTodayTopHitsChart();
-  refreshGlobalTopHitsChart();
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🎵 Suno Music Server listening on http://localhost:${PORT}`);
-  });
-});
-
 // ─── OTA In-App Update Endpoints ────────────────────────────────────────────
 
 // GET /api/version — Returns current app version info from app-version.json
@@ -1082,4 +1053,54 @@ app.get('/api/update/bundle', (req, res) => {
     console.error('Update bundle endpoint error:', err);
     res.status(500).json({ success: false, error: 'Could not serve update bundle' });
   }
+});
+
+// GET /api/update/apk — Streams the latest SunoMusic-release.apk to the client
+app.get('/api/update/apk', (req, res) => {
+  try {
+    const apkPath = path.resolve(__dirname, '../SunoMusic-release.apk');
+    if (!fs.existsSync(apkPath)) {
+      return res.status(404).json({ success: false, error: 'No APK available' });
+    }
+    const stat = fs.statSync(apkPath);
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Content-Disposition', 'attachment; filename="SunoMusic-release.apk"');
+    const stream = fs.createReadStream(apkPath);
+    stream.pipe(res);
+    stream.on('error', (err) => {
+      console.error('APK stream error:', err);
+      if (!res.headersSent) res.status(500).json({ success: false, error: 'Stream error' });
+    });
+  } catch (err) {
+    console.error('Update APK endpoint error:', err);
+    res.status(500).json({ success: false, error: 'Could not serve APK' });
+  }
+});
+
+const distPath = path.resolve(__dirname, '../dist');
+
+// Serve built frontend statically
+app.use(express.static(distPath));
+
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ error: 'Endpoint not found' });
+  }
+  res.sendFile(path.join(distPath, 'index.html'));
+});
+
+// Start Express server immediately so proxy & clients connect without ECONNREFUSED
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🎵 Suno Music Server listening on http://localhost:${PORT}`);
+});
+
+// Initialize database & charts in background
+initDatabase().then(() => {
+  refreshTodayTopHitsChart();
+  refreshGlobalTopHitsChart();
+}).catch(err => {
+  console.error('Database startup error:', err);
+  refreshTodayTopHitsChart();
+  refreshGlobalTopHitsChart();
 });

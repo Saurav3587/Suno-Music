@@ -51,21 +51,21 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
   const loadHomeData = async () => {
     try {
       setLoading(true);
-      const [featuredRes, chartsRes, forYouRes, spotifyRes] = await Promise.all([
-        fetch('/api/featured'),
-        fetch('/api/charts'),
-        fetch('/api/search?q=Ed+Sheeran+Taylor+Swift+Coldplay+Adele'),
-        fetch('/api/spotify/charts?type=top-hits')
+      const [featuredRes, chartsRes, forYouRes, spotifyRes] = await Promise.allSettled([
+        fetch('/api/featured').then(r => r.ok ? r.json() : null),
+        fetch('/api/charts').then(r => r.ok ? r.json() : null),
+        fetch('/api/search?q=Ed+Sheeran+Taylor+Swift+Coldplay+Adele').then(r => r.ok ? r.json() : null),
+        fetch('/api/spotify/charts?type=top-hits').then(r => r.ok ? r.json() : null)
       ]);
 
-      const featuredData = await featuredRes.json();
-      const chartsData = await chartsRes.json();
-      const forYouData = await forYouRes.json();
-      const spotifyData = await spotifyRes.json();
+      const featuredData = featuredRes.status === 'fulfilled' ? featuredRes.value : null;
+      const chartsData = chartsRes.status === 'fulfilled' ? chartsRes.value : null;
+      const forYouData = forYouRes.status === 'fulfilled' ? forYouRes.value : null;
+      const spotifyData = spotifyRes.status === 'fulfilled' ? spotifyRes.value : null;
 
-      setAcousticSongs(featuredData.songs || []);
-      setTrendingSongs(chartsData.songs || []);
-      setForYouSongs(forYouData.results || []);
+      if (featuredData?.songs) setAcousticSongs(featuredData.songs);
+      if (chartsData?.songs) setTrendingSongs(chartsData.songs);
+      if (forYouData?.results) setForYouSongs(forYouData.results);
 
       // Map spotify / 24h top tracks into playable card format
       const spTracks = (spotifyData.tracks || []).slice(0, 20).map((t, idx) => ({

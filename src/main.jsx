@@ -6,38 +6,56 @@ import './index.css';
 import { UserProvider } from './context/UserContext';
 import { MusicProvider } from './context/MusicContext';
 
-// Automatically route API requests to the backend server with auto-fallback between Emulator (10.0.2.2) and Physical Device (10.51.125.150)
+// Automatically route API requests to backend with resilient fallback between Cloud (Render) and Local (Laptop/Emulator)
 const isNative = Capacitor.isNativePlatform() || window.location.protocol === 'capacitor:' || (window.location.hostname === 'localhost' && window.location.port !== '5173');
 
 if (isNative) {
   const originalFetch = window.fetch;
-  const CANDIDATES = [
-    localStorage.getItem('suno_custom_backend'),
-    localStorage.getItem('suno_active_backend'),
-    'https://suno-music-x6c4.onrender.com',
+  const CLOUD_BACKEND = 'https://suno-music-x6c4.onrender.com';
+  const LOCAL_BACKENDS = [
     'http://10.51.125.150:3001',
     'http://10.0.2.2:3001',
     'http://localhost:3001'
-  ].filter(Boolean);
+  ];
 
-  let currentBackend = CANDIDATES[0] || 'https://suno-music-x6c4.onrender.com';
+  // Default to saved custom backend or cloud backend (never stick permanently to a dead local IP)
+  let currentBackend = localStorage.getItem('suno_custom_backend')
+    || localStorage.getItem('suno_active_backend')
+    || CLOUD_BACKEND;
 
-  // Proactive background ping to lock onto responding host immediately
+  // Proactive background ping on app launch:
+  // 1. Probe local server with a fast 1200ms timeout
+  // 2. Ping cloud backend concurrently to ensure Render is awake and ready
   (async () => {
-    for (const host of [currentBackend, 'https://suno-music-x6c4.onrender.com', 'http://10.51.125.150:3001', 'http://10.0.2.2:3001']) {
+    let foundLocal = false;
+    for (const localHost of LOCAL_BACKENDS) {
       try {
         const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), 2000);
-        const r = await originalFetch(`${host}/api/health`, { signal: controller.signal });
+        const t = setTimeout(() => controller.abort(), 1200);
+        const r = await originalFetch(`${localHost}/api/health`, { signal: controller.signal });
         clearTimeout(t);
         if (r.ok) {
-          currentBackend = host;
-          localStorage.setItem('suno_active_backend', host);
+          currentBackend = localHost;
+          localStorage.setItem('suno_active_backend', localHost);
+          foundLocal = true;
           break;
         }
       } catch (e) {
-        // try next candidate
+        // continue
       }
+    }
+
+    // If laptop is closed or on a different network, lock immediately onto cloud backend
+    if (!foundLocal && !localStorage.getItem('suno_custom_backend')) {
+      currentBackend = CLOUD_BACKEND;
+      localStorage.setItem('suno_active_backend', CLOUD_BACKEND);
+      // Warm up Render if cold
+      try {
+        const c = new AbortController();
+        const t = setTimeout(() => c.abort(), 10000);
+        await originalFetch(`${CLOUD_BACKEND}/api/health`, { signal: c.signal });
+        clearTimeout(t);
+      } catch (e) {}
     }
   })();
 
@@ -45,25 +63,34 @@ if (isNative) {
     if (typeof resource === 'string' && (resource.startsWith('/api') || resource.startsWith('/uploads'))) {
       const endpointsToTry = [
         currentBackend,
-        'https://suno-music-x6c4.onrender.com',
-        'http://10.51.125.150:3001',
-        'http://10.0.2.2:3001',
-        'http://localhost:3001'
+        CLOUD_BACKEND,
+        ...LOCAL_BACKENDS
       ].filter((h, idx, arr) => arr.indexOf(h) === idx);
 
       let lastError;
       for (const host of endpointsToTry) {
         try {
+          const isLocal = host.includes('10.') || host.includes('localhost') || host.includes('127.0.0.1');
+          // Local hosts fail fast (1500ms) if laptop is closed; Cloud host gets 15s for scraping & searches
+          const timeoutMs = isLocal ? 1500 : 15000;
+
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 3500);
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
           const combinedSignal = init?.signal || controller.signal;
           const res = await originalFetch(`${host}${resource}`, { ...init, signal: combinedSignal });
           clearTimeout(timer);
-          currentBackend = host;
-          localStorage.setItem('suno_active_backend', host);
+
+          if (currentBackend !== host) {
+            currentBackend = host;
+            localStorage.setItem('suno_active_backend', host);
+          }
           return res;
         } catch (err) {
           lastError = err;
+          // If the failed host was currentBackend, immediately switch to Cloud so next requests don't lag
+          if (currentBackend === host && host !== CLOUD_BACKEND) {
+            currentBackend = CLOUD_BACKEND;
+          }
         }
       }
       throw lastError || new Error('Failed to connect to backend server');

@@ -27,11 +27,27 @@ const mysqlConnectionOptions = {
   user: DB_USER,
   password: DB_PASSWORD,
   port: DB_PORT,
+  connectTimeout: 5000,
   ...(mysqlSsl ? { ssl: mysqlSsl } : {})
 };
 
 let pool = null;
 let isConnected = false;
+let dbInitPromise = null;
+
+// Helper to wait briefly if DB initialization is in-flight
+export async function ensureDbReady(timeoutMs = 3000) {
+  if (isConnected && pool) return true;
+  if (dbInitPromise) {
+    try {
+      await Promise.race([
+        dbInitPromise,
+        new Promise(resolve => setTimeout(resolve, timeoutMs))
+      ]);
+    } catch {}
+  }
+  return isConnected;
+}
 
 // In-memory fallback if MySQL server is not running locally during development
 const fallbackStore = {
@@ -46,42 +62,48 @@ const fallbackStore = {
  * Initializes MySQL connection pool and creates all required tables & indexes
  */
 export async function initDatabase() {
-  try {
-    // Step 1: Connect to MySQL server without selecting DB to ensure DB exists
-    const rootConn = await mysql.createConnection({
-      ...mysqlConnectionOptions
-    });
+  if (dbInitPromise) return dbInitPromise;
 
-    await rootConn.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
-    await rootConn.end();
+  dbInitPromise = (async () => {
+    try {
+      // Step 1: Connect to MySQL server without selecting DB to ensure DB exists
+      const rootConn = await mysql.createConnection({
+        ...mysqlConnectionOptions
+      });
 
-    // Step 2: Create connection pool targeting the suno_music database
-    pool = mysql.createPool({
-      ...mysqlConnectionOptions,
-      database: DB_NAME,
-      waitForConnections: true,
-      connectionLimit: 15,
-      queueLimit: 0,
-      enableKeepAlive: true,
-      keepAliveInitialDelay: 10000
-    });
+      await rootConn.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
+      await rootConn.end();
 
-    // Test connection
-    const testConn = await pool.getConnection();
-    isConnected = true;
-    testConn.release();
+      // Step 2: Create connection pool targeting the suno_music database
+      pool = mysql.createPool({
+        ...mysqlConnectionOptions,
+        database: DB_NAME,
+        waitForConnections: true,
+        connectionLimit: 15,
+        queueLimit: 0,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 10000
+      });
 
-    console.log(`✅ [MySQL] Successfully connected to database: ${DB_NAME} at ${DB_HOST}:${DB_PORT}`);
+      // Test connection
+      const testConn = await pool.getConnection();
+      isConnected = true;
+      testConn.release();
 
-    // Step 3: Run table migrations
-    await createTables();
-    return true;
-  } catch (err) {
-    console.warn(`⚠️ [MySQL] Could not connect to MySQL server (${err.message}).`);
-    console.warn(`💡 [MySQL] Running with fast In-Memory storage. Start MySQL/XAMPP on port ${DB_PORT} to persist data to disk.`);
-    isConnected = false;
-    return false;
-  }
+      console.log(`✅ [MySQL] Successfully connected to database: ${DB_NAME} at ${DB_HOST}:${DB_PORT}`);
+
+      // Step 3: Run table migrations
+      await createTables();
+      return true;
+    } catch (err) {
+      console.warn(`⚠️ [MySQL] Could not connect to MySQL server (${err.message}).`);
+      console.warn(`💡 [MySQL] Running with fast In-Memory storage. Start MySQL/XAMPP on port ${DB_PORT} to persist data to disk.`);
+      isConnected = false;
+      return false;
+    }
+  })();
+
+  return dbInitPromise;
 }
 
 /**
@@ -195,6 +217,7 @@ async function createTables() {
  * Creates a new user with name, unique user_id, phone, and password_hash
  */
 export async function createUser({ name, userId, phone, passwordHash, avatar = '🎧' }) {
+  await ensureDbReady();
   const id = `usr_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const cleanUserId = userId.trim().toLowerCase().replace(/^@/, '');
   const cleanPhone = phone.trim().replace(/[^0-9+]/g, '');
@@ -220,6 +243,7 @@ export async function createUser({ name, userId, phone, passwordHash, avatar = '
  */
 export async function getUserByLogin(login) {
   if (!login) return null;
+  await ensureDbReady();
   const clean = login.trim().toLowerCase().replace(/^@/, '');
   const cleanDigits = login.trim().replace(/[^0-9+]/g, '');
 
@@ -241,6 +265,7 @@ export async function getUserByLogin(login) {
  */
 export async function getUserById(id) {
   if (!id) return null;
+  await ensureDbReady();
 
   if (isConnected && pool) {
     const [rows] = await pool.query(`SELECT id, user_id, name, phone, avatar, bio, created_at FROM users WHERE id = ? LIMIT 1`, [id]);
@@ -271,6 +296,7 @@ export async function getUserById(id) {
  */
 export async function updateUserProfileDb(userId, { name, bio, avatar }) {
   if (!userId) return null;
+  await ensureDbReady();
 
   if (isConnected && pool) {
     const fields = [];
@@ -317,6 +343,7 @@ export async function updateUserProfileDb(userId, { name, bio, avatar }) {
  */
 export async function getUserLibrary(userId) {
   if (!userId) return { playlists: [], likedSongs: [], history: [] };
+  await ensureDbReady();
 
   if (isConnected && pool) {
     // 1. Playlists

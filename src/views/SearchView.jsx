@@ -163,35 +163,46 @@ export default function SearchView({
     const q = encodeURIComponent(searchTerm.trim());
 
     try {
-      const [studioRes, playlistRes] = await Promise.all([
-        fetch(`/api/search?q=${q}`),
-        fetch(`/api/search/playlists?q=${q}`)
-      ]);
-
-      const studioData = await studioRes.json();
-      const playlistData = await playlistRes.json();
-
       const EXCLUDE_REMIX_REGEX = /(slowed|reverb|speed\s*up|sped\s*up|nightcore|bass\s*boost|8d\s*audio|remix|mashup|tiktok|ringtone|dj\s*mix|extended\s*mix|club\s*mix|status|whatsapp)/i;
       const isClean = (t) => t && t.title && !EXCLUDE_REMIX_REGEX.test(t.title);
 
-      const studioList = (studioData.results || []).filter(isClean);
-      const combined = [];
-      const seenTitles = new Set();
+      // Fetch songs and playlists in parallel but independently so slow/failed playlist scraping never blocks songs
+      const songsPromise = fetch(`/api/search?q=${q}`)
+        .then(async (res) => {
+          if (!res.ok) return;
+          const studioData = await res.json();
+          const studioList = (studioData.results || []).filter(isClean);
+          const combined = [];
+          const seenTitles = new Set();
 
-      studioList.forEach(s => {
-        const key = `${s.title.toLowerCase()}_${s.artist.toLowerCase()}`;
-        if (!seenTitles.has(key)) {
-          seenTitles.add(key);
-          combined.push({
-            ...s,
-            badge: 'Studio 320k',
-            isSpotify: true
+          studioList.forEach(s => {
+            const key = `${s.title.toLowerCase()}_${s.artist.toLowerCase()}`;
+            if (!seenTitles.has(key)) {
+              seenTitles.add(key);
+              combined.push({
+                ...s,
+                badge: 'Studio 320k',
+                isSpotify: true
+              });
+            }
           });
-        }
-      });
 
-      setResults(combined);
-      setPlaylists(playlistData.playlists || []);
+          setResults(combined);
+        })
+        .catch((err) => console.warn('Songs search warning:', err))
+        .finally(() => setLoading(false));
+
+      const playlistsPromise = fetch(`/api/search/playlists?q=${q}`)
+        .then(async (res) => {
+          if (!res.ok) return;
+          const playlistData = await res.json();
+          if (Array.isArray(playlistData.playlists)) {
+            setPlaylists(playlistData.playlists);
+          }
+        })
+        .catch((err) => console.warn('Playlist search warning:', err));
+
+      await Promise.allSettled([songsPromise, playlistsPromise]);
     } catch (err) {
       console.error('Search error:', err);
     } finally {
