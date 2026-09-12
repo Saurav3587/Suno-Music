@@ -1109,7 +1109,7 @@ body.modal-scroll-lock,
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: calc(10px + var(--safe-top)) 20px calc(14px + var(--safe-bottom)) 20px;
+  padding: calc(10px + var(--safe-top)) 20px calc(28px + var(--safe-bottom)) 20px;
   width: 100%;
   max-width: 480px;
   height: 100%;
@@ -1201,8 +1201,8 @@ body.modal-scroll-lock,
   justify-content: center;
   flex: 1;
   min-height: 0;
-  margin: 4px 0;
-  padding: 4px 0;
+  margin: 2px 0 8px 0;
+  padding: 2px 0;
   width: 100%;
   overflow: hidden;
 }
@@ -1229,46 +1229,147 @@ body.modal-scroll-lock,
   box-shadow: inset 0 1.5px 2px rgba(255, 255, 255, 0.52), inset 0 -1.5px 2px rgba(0, 0, 0, 0.5), 0 28px 60px rgba(0, 0, 0, 0.9), 0 0 60px rgba(255, 59, 104, 0.38);
 }
 
-/* === Exit: current card slides DOWN and fades out === */
-.player-art-card.card-phase-exit {
-  animation: cardExitDown 0.22s cubic-bezier(0.4, 0, 1, 1) forwards;
-  transform-origin: center bottom;
+/* === Horizontal Card Deck Transition (Left to Right / Right to Left) === */
+/* Forward / Next Direction (Default): Card exits to the left with smooth tilt, new card enters from right */
+.player-art-card.card-phase-exit,
+.player-art-card.card-phase-exit.card-dir-next {
+  animation: cardExitLeft 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
+  transform-origin: center center;
 }
 
-@keyframes cardExitDown {
+@keyframes cardExitLeft {
   0% {
     opacity: 1;
-    transform: scale(1) translateY(0px);
+    transform: scale(1) translateX(0px) rotate(0deg);
   }
-
   100% {
     opacity: 0;
-    transform: scale(0.94) translateY(55px);
+    transform: scale(0.92) translateX(-75px) rotate(-3.5deg);
   }
 }
 
-/* === Enter: new card rises from BELOW === */
-.player-art-card.card-phase-enter {
-  animation: cardEnterUp 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  transform-origin: center bottom;
+.player-art-card.card-phase-enter,
+.player-art-card.card-phase-enter.card-dir-next {
+  animation: cardEnterRight 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transform-origin: center center;
 }
 
-@keyframes cardEnterUp {
+@keyframes cardEnterRight {
   0% {
     opacity: 0;
-    transform: scale(0.94) translateY(55px);
+    transform: scale(0.92) translateX(75px) rotate(3.5deg);
   }
-
   100% {
     opacity: 1;
-    transform: scale(1) translateY(0px);
+    transform: scale(1) translateX(0px) rotate(0deg);
   }
 }
 
-/* === Idle: card is settled, just sit there === */
+/* Previous Direction: Card exits to the right, new card enters from left */
+.player-art-card.card-phase-exit.card-dir-prev {
+  animation: cardExitRight 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
+  transform-origin: center center;
+}
+
+@keyframes cardExitRight {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateX(0px) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.92) translateX(75px) rotate(3.5deg);
+  }
+}
+
+.player-art-card.card-phase-enter.card-dir-prev {
+  animation: cardEnterLeft 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transform-origin: center center;
+}
+
+@keyframes cardEnterLeft {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateX(-75px) rotate(-3.5deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateX(0px) rotate(0deg);
+  }
+}
+
+/* === Idle: card is settled === */
 .player-art-card.card-phase-idle {
   opacity: 1;
-  transform: scale(1) translateY(0);
+  transform: scale(1) translateX(0) rotate(0deg);
+}
+
+/* Track Details Horizontal Crossfade */
+.player-details-info.details-phase-exit,
+.player-details-info.details-phase-exit.details-dir-next {
+  animation: detailsExitLeft 0.20s ease-out forwards;
+}
+
+@keyframes detailsExitLeft {
+  0% {
+    opacity: 1;
+    transform: translateX(0px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+
+.player-details-info.details-phase-enter,
+.player-details-info.details-phase-enter.details-dir-next {
+  animation: detailsEnterRight 0.32s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes detailsEnterRight {
+  0% {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0px);
+  }
+}
+
+.player-details-info.details-phase-exit.details-dir-prev {
+  animation: detailsExitRight 0.20s ease-out forwards;
+}
+
+@keyframes detailsExitRight {
+  0% {
+    opacity: 1;
+    transform: translateX(0px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+.player-details-info.details-phase-enter.details-dir-prev {
+  animation: detailsEnterLeft 0.32s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes detailsEnterLeft {
+  0% {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0px);
+  }
+}
+
+.player-details-info.details-phase-idle {
+  opacity: 1;
+  transform: translateX(0px);
 }
 
 .player-art-card-img {
@@ -1303,6 +1404,19 @@ body.modal-scroll-lock,
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.3), 0 4px 14px rgba(0, 0, 0, 0.5);
 }
 
+/* Smart Lower Controls Container — Elevated & Compact */
+.player-lower-controls {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: auto;
+  margin-bottom: 2px;
+  flex-shrink: 0;
+}
+
 /* Audio Scrubber & Controls */
 .player-details {
   position: relative;
@@ -1310,7 +1424,7 @@ body.modal-scroll-lock,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
+  margin-bottom: 0px;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -1385,7 +1499,7 @@ body.modal-scroll-lock,
 .scrubber-container {
   position: relative;
   z-index: 2;
-  margin-bottom: 10px;
+  margin-bottom: 2px;
   flex-shrink: 0;
 }
 
@@ -1440,7 +1554,7 @@ body.modal-scroll-lock,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 4px;
   flex-shrink: 0;
 }
 
@@ -1725,20 +1839,27 @@ body.modal-scroll-lock,
   box-shadow: 0 4px 14px rgba(255, 59, 104, 0.35);
 }
 
-/* Apple Liquid Glass Search Input */
+/* Apple Liquid Glass Search Form & Input */
+.search-form {
+  width: 100%;
+  margin: 10px 0 14px 0;
+  display: block;
+}
+
 .search-input-wrap {
-  margin: 6px 0 14px 0;
   width: 100%;
   position: relative;
   display: flex;
   align-items: center;
 }
 
-.search-input-wrap svg {
+.search-input-wrap > svg.search-input-icon,
+.search-input-wrap > svg:first-child {
   position: absolute;
   left: 15px;
   color: var(--text-tertiary);
   pointer-events: none;
+  z-index: 2;
 }
 
 .search-input {
@@ -1748,13 +1869,23 @@ body.modal-scroll-lock,
   -webkit-backdrop-filter: var(--backdrop-liquid);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 20px;
-  padding: 13px 40px 13px 44px;
+  padding: 13px 44px 13px 44px;
   color: #ffffff;
   font-family: var(--font-body);
   font-size: 0.90rem;
   outline: none;
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.18), 0 4px 18px rgba(0, 0, 0, 0.35);
   transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  -webkit-appearance: none;
+}
+
+/* Hide default browser clear button for search inputs */
+.search-input::-webkit-search-decoration,
+.search-input::-webkit-search-cancel-button,
+.search-input::-webkit-search-results-button,
+.search-input::-webkit-search-results-decoration {
+  display: none;
+  -webkit-appearance: none;
 }
 
 .search-input:focus {
@@ -1765,20 +1896,144 @@ body.modal-scroll-lock,
 
 .search-clear-btn {
   position: absolute;
-  right: 14px;
-  background: none;
-  border: none;
-  color: var(--text-tertiary);
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.75);
   cursor: pointer;
-  padding: 4px;
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 10;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.search-clear-btn:hover {
+.search-clear-btn:hover,
+.search-clear-btn:active {
+  background: rgba(255, 59, 104, 0.3);
+  border-color: rgba(255, 59, 104, 0.5);
   color: #ffffff;
+  transform: scale(1.08);
+}
+
+.search-clear-btn svg {
+  position: static !important;
+  left: auto !important;
+  color: currentColor !important;
+  pointer-events: none !important;
+  display: block !important;
+}
+
+/* Recent Searches Section */
+.search-history-section {
+  margin-bottom: 22px;
+}
+
+.search-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.search-history-title {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.2px;
+}
+
+.search-history-clear-all {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.search-history-clear-all:hover,
+.search-history-clear-all:active {
+  color: #ff3b68;
+  background: rgba(255, 59, 104, 0.12);
+}
+
+.search-history-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.search-history-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.055);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 100px;
+  padding: 6px 8px 6px 12px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.search-history-chip:hover {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.search-history-chip:active {
+  transform: scale(0.97);
+}
+
+.search-history-text {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-history-remove-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border: none;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 0;
+  margin-left: 2px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.search-history-remove-btn:hover {
+  background: rgba(255, 59, 104, 0.35);
+  color: #ffffff;
+  transform: scale(1.15);
 }
 
 /* Auto-playlist banner */
@@ -2961,17 +3216,17 @@ body.modal-scroll-lock,
 .import-playlist-card {
   width: calc(100% - 32px);
   max-width: 440px;
-  background: rgba(14, 11, 22, 0.94);
+  background: rgba(14, 11, 22, 0.92);
   background-image:
-    radial-gradient(circle at 50% 0%, rgba(255, 59, 104, 0.16) 0%, transparent 60%),
-    radial-gradient(circle at 90% 20%, rgba(162, 56, 255, 0.14) 0%, transparent 50%),
+    radial-gradient(circle at 50% 0%, rgba(255, 59, 104, 0.20) 0%, transparent 60%),
+    radial-gradient(circle at 90% 20%, rgba(162, 56, 255, 0.16) 0%, transparent 50%),
     linear-gradient(180deg, #130e22 0%, #090710 100%);
-  backdrop-filter: blur(36px) saturate(200%);
-  -webkit-backdrop-filter: blur(36px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 24px;
+  backdrop-filter: blur(40px) saturate(220%);
+  -webkit-backdrop-filter: blur(40px) saturate(220%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 26px;
   padding: 20px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), inset 0 1px 1.5px rgba(255, 255, 255, 0.3);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85), inset 0 1.5px 1.5px rgba(255, 255, 255, 0.35), inset 0 -1px 1px rgba(0, 0, 0, 0.45);
   animation: scaleUpModal 0.26s cubic-bezier(0.16, 1, 0.3, 1);
   box-sizing: border-box;
 }

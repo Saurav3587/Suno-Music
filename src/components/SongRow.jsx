@@ -11,7 +11,8 @@ export default function SongRow({
   isFromSearch = false,
   onSearchArtist = null,
   isGlass = false,
-  className = ''
+  className = '',
+  onSongClick = null
 }) {
   const { currentTrack, isPlaying, playSong, togglePlay, toggleLike, isLiked } = useMusic();
 
@@ -20,6 +21,7 @@ export default function SongRow({
   const playlistHandler = onAddToPlaylist || onOpenNote;
 
   const handleRowClick = () => {
+    if (onSongClick) onSongClick(song);
     if (isCurrent) {
       togglePlay();
     } else {

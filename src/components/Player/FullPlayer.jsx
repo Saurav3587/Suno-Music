@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useMusic } from '../../context/MusicContext';
-import Visualizer from './Visualizer';
 
 const SpotifyIcon = ({ size = 15, color = '#1db954' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
@@ -67,6 +66,8 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
   const [showLyrics, setShowLyrics] = useState(false);
   const [lyrics, setLyrics] = useState('');
   const [loadingLyrics, setLoadingLyrics] = useState(false);
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [seekValue, setSeekValue] = useState(0);
 
   // AI DJ Mood State
   const [showAiChat, setShowAiChat] = useState(false);
@@ -129,10 +130,51 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
     }
   }, [aiChatInput, aiChatLoading, currentTrack, playSong]);
 
-  // Two-phase card slide transition: 'idle' | 'exit' | 'enter'
+  // Two-phase horizontal card deck transition: 'idle' | 'exit' | 'enter'
   const [displayedTrack, setDisplayedTrack] = useState(currentTrack);
   const [cardPhase, setCardPhase] = useState('idle');
+  const [cardDirection, setCardDirection] = useState('next');
+  const cardDirectionRef = useRef('next');
   const prevTrackIdRef = useRef(currentTrack?.id);
+
+  const handleNextTrack = () => {
+    cardDirectionRef.current = 'next';
+    playNext();
+  };
+
+  const handlePrevTrack = () => {
+    cardDirectionRef.current = 'prev';
+    playPrev();
+  };
+
+  // Touch swipe support on player card (swiping left = next, swiping right = previous)
+  const touchStartXRef = useRef(null);
+  const touchStartYRef = useRef(null);
+
+  const handleCardTouchStart = (e) => {
+    if (e.touches && e.touches[0]) {
+      touchStartXRef.current = e.touches[0].clientX;
+      touchStartYRef.current = e.touches[0].clientY;
+    }
+  };
+
+  const handleCardTouchEnd = (e) => {
+    if (touchStartXRef.current === null) return;
+    const touch = e.changedTouches && e.changedTouches[0];
+    if (!touch) return;
+    const diffX = touch.clientX - touchStartXRef.current;
+    const diffY = touch.clientY - touchStartYRef.current;
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+
+    if (Math.abs(diffX) > 40 && Math.abs(diffX) > Math.abs(diffY) * 1.3) {
+      if (diffX < 0) {
+        handleNextTrack();
+      } else {
+        handlePrevTrack();
+      }
+    }
+  };
 
   useEffect(() => {
     if (!currentTrack) {
@@ -147,14 +189,21 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
       return;
     }
     if (currentTrack.id === prevTrackIdRef.current) return;
-    // Phase 1: trigger exit (slide down)
+
+    const dir = cardDirectionRef.current || 'next';
+    setCardDirection(dir);
+
+    // Phase 1: trigger horizontal exit (card slides like a card deck)
     setCardPhase('exit');
     const exitTimer = setTimeout(() => {
-      // Phase 2: swap content, trigger enter (rise from below)
+      // Phase 2: swap content, trigger enter (enters smoothly from opposite side)
       setDisplayedTrack(currentTrack);
       prevTrackIdRef.current = currentTrack.id;
       setCardPhase('enter');
-      const enterTimer = setTimeout(() => setCardPhase('idle'), 400);
+      const enterTimer = setTimeout(() => {
+        setCardPhase('idle');
+        cardDirectionRef.current = 'next';
+      }, 400);
       return () => clearTimeout(enterTimer);
     }, 220);
     return () => clearTimeout(exitTimer);
@@ -287,10 +336,14 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
           )}
         </div>
       ) : (
-        <div className="player-card-container">
-          {/* card-phase class drives exit-slide-down / enter-slide-up CSS keyframes */}
+        <div
+          className="player-card-container"
+          onTouchStart={handleCardTouchStart}
+          onTouchEnd={handleCardTouchEnd}
+        >
+          {/* card-phase & card-dir drive smooth left-to-right card deck transitions */}
           <div
-            className={`player-art-card card-phase-${cardPhase} ${isPlaying && cardPhase === 'idle' ? 'playing' : ''}`}
+            className={`player-art-card card-phase-${cardPhase} card-dir-${cardDirection} ${isPlaying && cardPhase === 'idle' ? 'playing' : ''}`}
           >
             <img
               src={track.image || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=500&auto=format&fit=crop&q=80'}
@@ -307,75 +360,103 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
         </div>
       )}
 
-      {/* Track Details — slides together with the card */}
-      <div className="player-details">
-        <div className={`player-details-info details-phase-${cardPhase}`}>
-          <div className="player-song-title">{track.title || 'Unknown Title'}</div>
-          <div className="player-song-artist">{track.artist || 'Unknown Artist'}</div>
+      {/* Smart Lower Controls Container — Lifted Upward */}
+      <div className="player-lower-controls">
+        {/* Track Details — slides together with the card */}
+        <div className="player-details">
+          <div className={`player-details-info details-phase-${cardPhase} details-dir-${cardDirection}`}>
+            <div className="player-song-title">{track.title || 'Unknown Title'}</div>
+            <div className="player-song-artist">{track.artist || 'Unknown Artist'}</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              className="action-btn heart-burst"
+              onClick={handleLikeWithConfetti}
+              title={liked ? 'Liked' : 'Like'}
+            >
+              <Heart
+                size={24}
+                fill={liked ? '#ff3b68' : 'none'}
+                color={liked ? '#ff3b68' : 'currentColor'}
+              />
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button
-            className="action-btn heart-burst"
-            onClick={handleLikeWithConfetti}
-            title={liked ? 'Liked' : 'Like'}
-          >
-            <Heart
-              size={24}
-              fill={liked ? '#ff3b68' : 'none'}
-              color={liked ? '#ff3b68' : 'currentColor'}
-            />
-          </button>
-        </div>
-      </div>
 
-      {/* Waveform Visualizer */}
-      <Visualizer isPlaying={isPlaying} />
-
-      {/* Scrubber */}
-      <div className="scrubber-container">
-        <input
-          type="range"
-          min={0}
-          max={duration || 100}
-          value={currentTime}
-          onChange={(e) => seekTo(Number(e.target.value))}
-          className="scrubber-slider"
-        />
-        <div className="scrubber-times">
-          <span>{formatTime(currentTime)}</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            {radioMoodLabel ? (
-              <span style={{
-                color: '#ff758c',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                background: 'rgba(255, 59, 104, 0.12)',
-                border: '1px solid rgba(255, 59, 104, 0.3)',
-                padding: '2px 8px',
-                borderRadius: '100px',
-                fontSize: '0.68rem',
-                fontWeight: 600
-              }}>
-                <Sparkles size={11} /> {radioMoodLabel}
-              </span>
-            ) : currentTrack.isSpotify || currentTrack.source === 'spotify-resolved' || (currentTrack.badge && currentTrack.badge.includes('Spotify')) ? (
-              <span style={{ color: '#1db954', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <SpotifyIcon size={13} /> Spotify 320k
-              </span>
-            ) : currentTrack.source === 'youtube' ? (
-              <span style={{ color: '#ff4d4d', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <YoutubeIcon size={14} color="#ff0000" /> {currentTrack.isAcoustic ? 'Acoustic Cover' : 'YouTube Music'}
-              </span>
-            ) : (
-              <span style={{ color: '#ff85a2', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Sparkles size={11} /> 320k Studio Master
-              </span>
-            )}
-          </span>
-          <span>{formatTime(duration)}</span>
-        </div>
-      </div>
+        {/* Scrubber with Dynamic Playing Fill */}
+        {(() => {
+          const displayTime = isSeeking ? seekValue : currentTime;
+          const progressPercent = duration ? Math.min(100, Math.max(0, (displayTime / duration) * 100)) : 0;
+          return (
+            <div className="scrubber-container">
+              <input
+                type="range"
+                min={0}
+                max={duration || 100}
+                step="0.1"
+                value={displayTime || 0}
+                onMouseDown={() => { setIsSeeking(true); setSeekValue(currentTime); }}
+                onTouchStart={() => { setIsSeeking(true); setSeekValue(currentTime); }}
+                onPointerDown={() => { setIsSeeking(true); setSeekValue(currentTime); }}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setSeekValue(val);
+                }}
+                onMouseUp={(e) => {
+                  setIsSeeking(false);
+                  seekTo(Number(e.target.value));
+                }}
+                onTouchEnd={() => {
+                  setIsSeeking(false);
+                  seekTo(seekValue);
+                }}
+                onPointerUp={() => {
+                  setIsSeeking(false);
+                  seekTo(seekValue);
+                }}
+                className="scrubber-slider"
+                aria-label="Track progress slider"
+                style={{
+                  background: `linear-gradient(to right, #ff3b68 0%, #ff758c ${progressPercent}%, rgba(255, 255, 255, 0.16) ${progressPercent}%, rgba(255, 255, 255, 0.16) 100%)`
+                }}
+              />
+              <div className="scrubber-times">
+                <span>{formatTime(displayTime)}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  {radioMoodLabel ? (
+                    <span style={{
+                      color: '#ff758c',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      background: 'rgba(255, 59, 104, 0.12)',
+                      border: '1px solid rgba(255, 59, 104, 0.3)',
+                      padding: '2px 8px',
+                      borderRadius: '100px',
+                      fontSize: '0.68rem',
+                      fontWeight: 600
+                    }}>
+                      <Sparkles size={11} /> {radioMoodLabel}
+                    </span>
+                  ) : currentTrack.isSpotify || currentTrack.source === 'spotify-resolved' || (currentTrack.badge && currentTrack.badge.includes('Spotify')) ? (
+                    <span style={{ color: '#1db954', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <SpotifyIcon size={13} /> Spotify 320k
+                    </span>
+                  ) : currentTrack.source === 'youtube' ? (
+                    <span style={{ color: '#ff4d4d', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <YoutubeIcon size={14} color="#ff0000" /> {currentTrack.isAcoustic ? 'Acoustic Cover' : 'YouTube Music'}
+                    </span>
+                  ) : (
+                    <span style={{ color: '#ff85a2', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Sparkles size={11} /> 320k Studio Master
+                    </span>
+                  )}
+                </span>
+                <span>{formatTime(duration)}</span>
+              </div>
+            </div>
+          );
+        })()}
 
       {/* Main Controls */}
       <div className="player-actions-row">
@@ -387,7 +468,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
           <Shuffle size={20} color={isShuffle ? '#ff3b68' : 'currentColor'} />
         </button>
 
-        <button className="action-btn" onClick={playPrev} title="Previous">
+        <button className="action-btn" onClick={handlePrevTrack} title="Previous">
           <SkipBack size={26} />
         </button>
 
@@ -399,7 +480,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
           )}
         </button>
 
-        <button className="action-btn" onClick={playNext} title="Next">
+        <button className="action-btn" onClick={handleNextTrack} title="Next">
           <SkipForward size={26} />
         </button>
 
@@ -692,5 +773,6 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
         </button>
       </div>
     </div>
-  );
+  </div>
+);
 }

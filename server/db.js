@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
 import { randomUUID } from 'crypto';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -9,6 +10,25 @@ const DB_USER = process.env.DB_USER || 'root';
 const DB_PASSWORD = process.env.DB_PASSWORD || '';
 const DB_NAME = process.env.DB_NAME || 'suno_music';
 const DB_PORT = parseInt(process.env.DB_PORT || '3306', 10);
+const DB_SSL_CA = process.env.DB_SSL_CA;
+
+const caCertificate = DB_SSL_CA?.includes('BEGIN CERTIFICATE')
+  ? DB_SSL_CA
+  : DB_SSL_CA && !DB_SSL_CA.includes('path\\to\\ca.pem') && fs.existsSync(DB_SSL_CA)
+    ? fs.readFileSync(DB_SSL_CA, 'utf8')
+    : undefined;
+
+const mysqlSsl = caCertificate
+  ? { ca: caCertificate, rejectUnauthorized: true }
+  : undefined;
+
+const mysqlConnectionOptions = {
+  host: DB_HOST,
+  user: DB_USER,
+  password: DB_PASSWORD,
+  port: DB_PORT,
+  ...(mysqlSsl ? { ssl: mysqlSsl } : {})
+};
 
 let pool = null;
 let isConnected = false;
@@ -29,10 +49,7 @@ export async function initDatabase() {
   try {
     // Step 1: Connect to MySQL server without selecting DB to ensure DB exists
     const rootConn = await mysql.createConnection({
-      host: DB_HOST,
-      user: DB_USER,
-      password: DB_PASSWORD,
-      port: DB_PORT
+      ...mysqlConnectionOptions
     });
 
     await rootConn.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
@@ -40,11 +57,8 @@ export async function initDatabase() {
 
     // Step 2: Create connection pool targeting the suno_music database
     pool = mysql.createPool({
-      host: DB_HOST,
-      user: DB_USER,
-      password: DB_PASSWORD,
+      ...mysqlConnectionOptions,
       database: DB_NAME,
-      port: DB_PORT,
       waitForConnections: true,
       connectionLimit: 15,
       queueLimit: 0,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Music, Sparkles, Flame, ListMusic, Play, Compass, Layers } from 'lucide-react';
+import { Search, X, Music, Sparkles, Flame, ListMusic, Play, Compass, Layers, Clock } from 'lucide-react';
 import SongRow from '../components/SongRow';
 import SpotifyPlaylistsSection from '../components/SpotifyPlaylistsSection';
 import { useMusic } from '../context/MusicContext';
@@ -99,6 +99,57 @@ export default function SearchView({
   const [activeTab, setActiveTab] = useState('all'); // 'all' | 'songs' | 'playlists'
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Search History State from LocalStorage
+  const [searchHistory, setSearchHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('suno_search_history');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const addToHistory = (term) => {
+    const clean = (term || '').trim();
+    if (!clean) return;
+    setSearchHistory((prev) => {
+      const filtered = prev.filter((item) => item.toLowerCase() !== clean.toLowerCase());
+      const updated = [clean, ...filtered].slice(0, 10);
+      try {
+        localStorage.setItem('suno_search_history', JSON.stringify(updated));
+      } catch (e) {
+        console.error('Failed to save search history', e);
+      }
+      return updated;
+    });
+  };
+
+  const removeFromHistory = (termToRemove, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setSearchHistory((prev) => {
+      const updated = prev.filter((item) => item.toLowerCase() !== termToRemove.toLowerCase());
+      try {
+        localStorage.setItem('suno_search_history', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
+
+  const clearAllHistory = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setSearchHistory([]);
+    try {
+      localStorage.removeItem('suno_search_history');
+    } catch (e) {}
+  };
 
   // Pure Studio 320k Master Audio + Playlists Search
   const performSearch = async (searchTerm) => {
@@ -163,26 +214,79 @@ export default function SearchView({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       performSearch(val);
-    }, 350);
+    }, 400);
+  };
+
+  const handleFormSubmit = (e) => {
+    if (e) e.preventDefault();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (inputRef.current) {
+      inputRef.current.blur(); // dismiss mobile virtual keyboard
+    }
+    const clean = query.trim();
+    if (clean) {
+      addToHistory(clean);
+      performSearch(clean);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleFormSubmit(e);
+    }
+  };
+
+  const handleHistoryClick = (historyQuery) => {
+    setQuery(historyQuery);
+    addToHistory(historyQuery);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    performSearch(historyQuery);
   };
 
   const handleChipClick = (chipQuery) => {
     setQuery(chipQuery);
+    addToHistory(chipQuery);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     performSearch(chipQuery);
   };
 
   const handleCategoryClick = (catQuery) => {
     setQuery(catQuery);
+    addToHistory(catQuery);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     performSearch(catQuery);
   };
 
-  const clearSearch = () => {
+  const clearSearch = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     setQuery('');
     setResults([]);
     setPlaylists([]);
     setActiveTab('all');
+    if (inputRef.current) {
+      inputRef.current.value = '';
+      inputRef.current.focus();
+    }
+  };
+
+  const handleSongClickFromSearch = (song) => {
+    const termToSave = query.trim() || song?.title;
+    if (termToSave) {
+      addToHistory(termToSave);
+    }
+  };
+
+  const handlePlaylistClickFromSearch = (playlist) => {
+    const termToSave = query.trim() || playlist?.name;
+    if (termToSave) {
+      addToHistory(termToSave);
+    }
+    handlePlaylistSelect(playlist);
   };
 
   const displayedResults = results;
@@ -200,23 +304,40 @@ export default function SearchView({
         </div>
       </header>
 
-      {/* Search Input Box */}
-      <div className="search-input-wrap" style={{ marginTop: '16px', marginBottom: '12px' }}>
-        <Search size={20} color="rgba(255,255,255,0.6)" />
-        <input
-          type="text"
-          value={query}
-          onChange={handleInputChange}
-          placeholder="What do you want to listen to? (e.g. Taylor Swift, Arijit Singh, Lo-Fi)..."
-          className="search-input"
-          autoFocus={Boolean(initialQuery)}
-        />
-        {query && (
-          <button className="search-clear-btn" onClick={clearSearch}>
-            <X size={18} />
-          </button>
-        )}
-      </div>
+      {/* Search Form Box */}
+      <form onSubmit={handleFormSubmit} className="search-form" action="" role="search">
+        <div className="search-input-wrap">
+          <Search size={19} className="search-input-icon" color="rgba(255,255,255,0.6)" />
+          <input
+            ref={inputRef}
+            type="search"
+            enterKeyHint="search"
+            value={query}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            placeholder="What do you want to listen to? (e.g. Taylor Swift, Arijit Singh)..."
+            className="search-input"
+            autoFocus={Boolean(initialQuery)}
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck="false"
+          />
+          {query && (
+            <button
+              type="button"
+              className="search-clear-btn"
+              onClick={clearSearch}
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                clearSearch(e);
+              }}
+              aria-label="Clear search"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
+      </form>
 
       {/* Smart Filter Tabs */}
       {query && !loading && (results.length > 0 || playlists.length > 0) && (
@@ -273,6 +394,49 @@ export default function SearchView({
       {/* Search Home: Quick Chips + Browse All Spotify Categories */}
       {!query && (
         <div style={{ paddingBottom: '24px' }}>
+          {/* Recent Searches Section */}
+          {searchHistory.length > 0 && (
+            <div className="search-history-section">
+              <div className="search-history-header">
+                <div className="search-history-title">
+                  <Clock size={14} color="#00d2d3" />
+                  <span>Recent Searches</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearAllHistory}
+                  className="search-history-clear-all"
+                >
+                  Clear All
+                </button>
+              </div>
+              <div className="search-history-chips">
+                {searchHistory.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="search-history-chip"
+                    onClick={() => handleHistoryClick(item)}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <Clock size={12} color="rgba(255,255,255,0.4)" style={{ flexShrink: 0 }} />
+                    <span className="search-history-text">{item}</span>
+                    <button
+                      type="button"
+                      className="search-history-remove-btn"
+                      onClick={(e) => removeFromHistory(item, e)}
+                      onTouchEnd={(e) => removeFromHistory(item, e)}
+                      aria-label={`Remove ${item}`}
+                      title="Remove"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Popular Search Chips */}
           <div style={{ marginBottom: '20px' }}>
             <div style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.6)', fontWeight: 600, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -337,32 +501,11 @@ export default function SearchView({
           </div>
         ) : query ? (
           <>
-            {/* 1. Playlists & Albums Section (Shown in 'all' or 'playlists' tabs) */}
-            {(activeTab === 'all' || activeTab === 'playlists') && playlists.length > 0 && (
-              <div style={{ marginBottom: '22px' }}>
-                <div className="section-header" style={{ paddingTop: '4px' }}>
-                  <div className="section-title">
-                    <ListMusic size={18} color="#00d2d3" />
-                    <span>Playlists & Albums</span>
-                  </div>
-                  <span className="section-subtitle" style={{ color: '#00d2d3' }}>
-                    {playlists.length} Curated
-                  </span>
-                </div>
-
-                <div className="spotify-playlists-responsive-grid">
-                  {playlists.map(p => (
-                    <PlaylistSearchCard key={p.id} playlist={p} onSelect={handlePlaylistSelect} />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 2. Songs Section (Shown in 'all' or 'songs' tabs) */}
+            {/* 1. Songs Section (Primary Priority - Shown in 'all' or 'songs' tabs) */}
             {(activeTab === 'all' || activeTab === 'songs') && (
-              <div>
+              <div style={{ marginBottom: (activeTab === 'all' && playlists.length > 0 && displayedResults.length > 0) ? '26px' : '0' }}>
                 {displayedResults.length > 0 && (
-                  <div className="section-header" style={{ paddingTop: activeTab === 'all' && playlists.length > 0 ? '6px' : '4px' }}>
+                  <div className="section-header" style={{ paddingTop: '4px' }}>
                     <div className="section-title">
                       <Sparkles size={16} color="#ff3b68" />
                       <span>{displayedResults.length} Studio Master Songs</span>
@@ -380,6 +523,7 @@ export default function SearchView({
                       isFromSearch={true}
                       onAddToPlaylist={onOpenAddToPlaylist}
                       onSearchArtist={onSearchArtist}
+                      onSongClick={handleSongClickFromSearch}
                     />
                   ))
                 ) : activeTab === 'songs' ? (
@@ -388,6 +532,27 @@ export default function SearchView({
                     <p>No individual songs found matching "{query}". Check the Playlists tab!</p>
                   </div>
                 ) : null}
+              </div>
+            )}
+
+            {/* 2. Playlists & Albums Section (Secondary Priority - Shown in 'all' or 'playlists' tabs) */}
+            {(activeTab === 'all' || activeTab === 'playlists') && playlists.length > 0 && (
+              <div style={{ marginBottom: '22px' }}>
+                <div className="section-header" style={{ paddingTop: activeTab === 'all' && displayedResults.length > 0 ? '8px' : '4px' }}>
+                  <div className="section-title">
+                    <ListMusic size={18} color="#00d2d3" />
+                    <span>Playlists & Albums</span>
+                  </div>
+                  <span className="section-subtitle" style={{ color: '#00d2d3' }}>
+                    {playlists.length} Curated
+                  </span>
+                </div>
+
+                <div className="spotify-playlists-responsive-grid">
+                  {playlists.map(p => (
+                    <PlaylistSearchCard key={p.id} playlist={p} onSelect={handlePlaylistClickFromSearch} />
+                  ))}
+                </div>
               </div>
             )}
 

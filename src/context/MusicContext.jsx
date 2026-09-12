@@ -81,12 +81,39 @@ export function MusicProvider({ children }) {
     setActivePlaylistModal(null);
   };
 
-  const skippedArtistsRef = useRef([]);
+  const isAdvancingTrackRef = useRef(false);
   const isPrefetchingRef = useRef(false);
   const playedCanonicalTitlesRef = useRef(new Set());
   const accumulatedListenSecondsRef = useRef(0);
   const recordedTrackIdRef = useRef(null);
   const lastSavedTimeRef = useRef(0);
+
+  // Persistent refs to always provide latest values to native event listeners & background callbacks
+  const queueRef = useRef(queue);
+  const queueIndexRef = useRef(queueIndex);
+  const currentTrackRef = useRef(currentTrack);
+  const isPlayingRef = useRef(isPlaying);
+  const currentTimeRef = useRef(currentTime);
+  const durationRef = useRef(duration);
+  const repeatModeRef = useRef(repeatMode);
+  const isShuffleRef = useRef(isShuffle);
+  const autoplayEnabledRef = useRef(autoplayEnabled);
+
+  useEffect(() => { queueRef.current = queue; }, [queue]);
+  useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
+  useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
+  useEffect(() => { durationRef.current = duration; }, [duration]);
+  useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
+  useEffect(() => { isShuffleRef.current = isShuffle; }, [isShuffle]);
+  useEffect(() => { autoplayEnabledRef.current = autoplayEnabled; }, [autoplayEnabled]);
+
+  const playNextRef = useRef();
+  const playPrevRef = useRef();
+  const handleSongEndedRef = useRef();
+  const seekToRef = useRef();
+  const togglePlayRef = useRef();
 
   // Restore user-scoped state & track when logged-in user changes
   useEffect(() => {
@@ -305,42 +332,71 @@ export function MusicProvider({ children }) {
     }
   }, [currentTime, duration, currentUser?.id]);
 
-  // Audio event listeners for standard audio streams
+  // Audio event listeners for standard audio streams (stable references to avoid stale closure / reattachment bugs)
   useEffect(() => {
     const audio = audioRef.current;
     audio.preload = 'auto';
 
     const onTimeUpdate = () => {
-      if (currentTrack?.source !== 'youtube') {
-        setCurrentTime(audio.currentTime);
+      if (currentTrackRef.current?.source !== 'youtube') {
+        const cTime = audio.currentTime;
+        setCurrentTime(cTime);
+        currentTimeRef.current = cTime;
+        if (audio.duration && !isNaN(audio.duration)) {
         if (audio.duration && !isNaN(audio.duration)) {
           setDuration(audio.duration);
+          durationRef.current = audio.duration;
+          // Sync notification with new duration
+          syncNativeNotification({ duration: audio.duration });
+          // Background completion watchdog:
+          // If within 0.35s of track duration and still active, proactively trigger handleSongEnded
+          if (audio.duration > 5 && cTime >= audio.duration - 0.35 && !audio.paused && !audio.ended) {
+            handleSongEndedRef.current?.();
+          }
+        }
         }
       }
     };
 
     const onLoadedMetadata = () => {
-      if (currentTrack?.source !== 'youtube') {
+      if (currentTrackRef.current?.source !== 'youtube') {
         if (audio.duration && !isNaN(audio.duration)) {
           setDuration(audio.duration);
+          durationRef.current = audio.duration;
         }
       }
     };
 
     const onPlay = () => {
-      if (currentTrack?.source !== 'youtube') setIsPlaying(true);
+      if (currentTrackRef.current?.source !== 'youtube') {
+        setIsPlaying(true);
+        isPlayingRef.current = true;
+      }
     };
+
     const onPause = () => {
-      if (currentTrack?.source !== 'youtube') setIsPlaying(false);
+      if (currentTrackRef.current?.source !== 'youtube') {
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+      }
     };
 
     const onEnded = () => {
-      if (currentTrack?.source !== 'youtube') handleSongEnded();
+      if (currentTrackRef.current?.source !== 'youtube') {
+        handleSongEndedRef.current?.();
+      }
     };
 
     const onError = (e) => {
       console.warn('Audio playback error:', e);
-      if (currentTrack?.source !== 'youtube') setIsPlaying(false);
+      if (currentTrackRef.current?.source !== 'youtube') {
+        // Auto-recover on playback error
+        if (isPlayingRef.current) {
+          setTimeout(() => {
+            playNextRef.current?.();
+          }, 800);
+        }
+      }
     };
 
     audio.addEventListener('timeupdate', onTimeUpdate);
@@ -358,51 +414,232 @@ export function MusicProvider({ children }) {
       audio.removeEventListener('ended', onEnded);
       audio.removeEventListener('error', onError);
     };
-  }, [queue, queueIndex, repeatMode, isShuffle, currentTrack]);
+  }, []);
 
-  // MediaSession integration for Lockscreen & Smartwatch controls
+  // MediaSession Action Handlers (Registered once on mount with dynamic ref delegation)
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+
+    try {
+      navigator.mediaSession.setActionHandler('play', () => {
+        if (currentTrackRef.current?.source === 'youtube') {
+          ytPlayerRef.current?.playVideo();
+        } else {
+          audioRef.current.play().catch(() => {});
+        }
+        setIsPlaying(true);
+        isPlayingRef.current = true;
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        if (currentTrackRef.current?.source === 'youtube') {
+          ytPlayerRef.current?.pauseVideo();
+        } else {
+          audioRef.current.pause();
+        }
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+      });
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        playPrevRef.current?.();
+      });
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        playNextRef.current?.();
+      });
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime !== undefined) {
+          seekToRef.current?.(details.seekTime);
+        }
+      });
+    } catch (err) {
+      console.warn('MediaSession setup failed:', err);
+    }
+  }, []);
+
+  // Update MediaSession metadata when currentTrack changes
   useEffect(() => {
     if (!currentTrack || !('mediaSession' in navigator)) return;
-
     try {
       navigator.mediaSession.metadata = new window.MediaMetadata({
         title: currentTrack.title || 'Unknown Title',
         artist: currentTrack.artist || 'Unknown Artist',
         album: currentTrack.album || 'Suno: For You',
         artwork: [
-          { src: currentTrack.image, sizes: '512x512', type: 'image/jpeg' }
+          { src: currentTrack.image || '', sizes: '512x512', type: 'image/jpeg' }
         ]
       });
-
-      navigator.mediaSession.setActionHandler('play', () => {
-        if (currentTrack.source === 'youtube') {
-          ytPlayerRef.current?.playVideo();
-        } else {
-          audioRef.current.play().catch(() => {});
-        }
-      });
-      navigator.mediaSession.setActionHandler('pause', () => {
-        if (currentTrack.source === 'youtube') {
-          ytPlayerRef.current?.pauseVideo();
-        } else {
-          audioRef.current.pause();
-        }
-      });
-      navigator.mediaSession.setActionHandler('previoustrack', () => {
-        playPrev();
-      });
-      navigator.mediaSession.setActionHandler('nexttrack', () => {
-        playNext();
-      });
-      navigator.mediaSession.setActionHandler('seekto', (details) => {
-        if (details.seekTime !== undefined) {
-          seekTo(details.seekTime);
-        }
-      });
     } catch (err) {
-      console.warn('MediaSession setup failed:', err);
+      console.warn('MediaSession metadata update failed:', err);
     }
-  }, [currentTrack]);
+  }, [currentTrack?.id, currentTrack?.title]);
+
+  // Sync playbackState to browser / OS MediaSession
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+  }, [isPlaying]);
+
+  // Sync position state to MediaSession for live scrubber on Android 13+ & Lockscreen
+  // Helper to sync native Android notification and MediaSession
+  // ALWAYS reads from refs so it never captures stale closure values
+  const syncNativeNotification = (overrides = {}) => {
+    const MusicNotification = window.Capacitor?.Plugins?.MusicNotification;
+    if (!MusicNotification) return;
+    const track = currentTrackRef.current;
+    MusicNotification.updatePlayback({
+      title: track?.title || 'Unknown Title',
+      artist: track?.artist || 'Unknown Artist',
+      album: track?.album || 'Suno: For You',
+      imageUrl: track?.image || '',
+      isPlaying: Boolean(isPlayingRef.current),
+      duration: Math.floor((overrides.duration !== undefined ? overrides.duration : durationRef.current) || 0),
+      currentTime: Math.floor((overrides.currentTime !== undefined ? overrides.currentTime : currentTimeRef.current) || 0)
+    }).catch(err => console.warn('Native MusicNotification update failed:', err));
+  };
+
+  // Keep a stable ref to syncNativeNotification so interval/visibility handlers always call the latest version
+  const syncNativeNotificationRef = useRef(syncNativeNotification);
+  useEffect(() => { syncNativeNotificationRef.current = syncNativeNotification; });
+
+
+
+  // Listen to Lock Screen, Dynamic Island, and Notification Actions from Android Native
+  useEffect(() => {
+    const MusicNotification = window.Capacitor?.Plugins?.MusicNotification;
+    if (!MusicNotification) return;
+
+    let removeListener = null;
+    try {
+      const listenerRes = MusicNotification.addListener('mediaAction', (data) => {
+        if (!data || !data.action) return;
+        if (data.action === 'play') {
+          if (audioRef.current?.paused) audioRef.current.play().catch(() => {});
+          setIsPlaying(true);
+          isPlayingRef.current = true;
+        } else if (data.action === 'pause') {
+          if (!audioRef.current?.paused) audioRef.current.pause();
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+        } else if (data.action === 'next') {
+          playNextRef.current?.();
+        } else if (data.action === 'prev') {
+          playPrevRef.current?.();
+        } else if (data.action === 'seek' && data.position !== undefined) {
+          seekToRef.current?.(data.position);
+        }
+      });
+      if (listenerRes && typeof listenerRes.then === 'function') {
+        listenerRes.then((handle) => {
+          if (handle && handle.remove) removeListener = handle.remove;
+        }).catch(() => {});
+      } else if (listenerRes && typeof listenerRes.remove === 'function') {
+        removeListener = () => listenerRes.remove();
+      }
+    } catch (err) {
+      console.warn('MusicNotification listener error:', err);
+    }
+
+    return () => {
+      if (typeof removeListener === 'function') {
+        try { removeListener(); } catch (_) {}
+      }
+    };
+  }, []);
+
+  // ─── Reliable 1-second notification sync interval ────────────────────────────
+  // Pushes currentTime + isPlaying state to the native notification every second
+  // so the lock-screen scrubber and notification controls stay in perfect sync
+  // with the in-app player regardless of React render cycles.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (currentTrackRef.current && isPlayingRef.current) {
+        syncNativeNotificationRef.current();
+        // Also keep browser MediaSession position state fresh (Android 13+ scrubber)
+        if ('mediaSession' in navigator && navigator.mediaSession.setPositionState) {
+          try {
+            const dur = durationRef.current;
+            const pos = currentTimeRef.current;
+            if (dur > 0 && pos >= 0 && pos <= dur) {
+              navigator.mediaSession.setPositionState({
+                duration: dur,
+                playbackRate: 1,
+                position: pos
+              });
+            }
+          } catch (_) {}
+        }
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ─── Background / lock-screen song-end watchdog ──────────────────────────────
+  // When the user minimizes the app or locks the phone, the browser may throttle
+  // JS timers so the normal 'ended' event / 0.35s watchdog never fires.
+  // When the page becomes visible again we check whether audio has already
+  // finished and advance the queue if so.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+
+      const track = currentTrackRef.current;
+      if (!track) return;
+
+      if (track.source === 'youtube' || track.youtubeId) {
+        // YouTube: check player state — 0 = ENDED
+        try {
+          const ytState = ytPlayerRef.current?.getPlayerState?.();
+          if (ytState === 0) {
+            handleSongEndedRef.current?.();
+          } else if (ytState === 1) {
+            // Still playing — update notification so UI re-syncs
+            syncNativeNotificationRef.current();
+          }
+        } catch (_) {}
+      } else {
+        const audio = audioRef.current;
+        if (!audio) return;
+        if (audio.ended || (audio.duration > 0 && audio.currentTime >= audio.duration - 0.5)) {
+          // Song ended while we were backgrounded — advance to next track
+          handleSongEndedRef.current?.();
+        } else if (!audio.paused && isPlayingRef.current) {
+          // Audio is still playing — push fresh position to notification & MediaSession
+          syncNativeNotificationRef.current();
+        } else if (audio.paused && isPlayingRef.current) {
+          // Audio unexpectedly paused in background (OS media focus loss) — resume
+          audio.play().catch(() => {
+            syncNativeNotificationRef.current();
+          });
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
+  // Helper to pre-resolve stream URLs in background so transition between tracks is seamless
+  const resolveTrackStreamUrl = async (track) => {
+    if (!track || track.streamUrl) return track;
+    try {
+      const q = encodeURIComponent(`${track.title} ${track.artist || ''}`);
+      const resolveRes = await fetch(`/api/search?q=${q}`);
+      const resolveData = await resolveRes.json();
+      if (resolveData.results && resolveData.results.length > 0) {
+        return { ...track, ...resolveData.results[0], source: 'saavn' };
+      }
+      if (!track.youtubeId) {
+        const ytRes = await fetch(`/api/yt-search?q=${q}`);
+        const ytData = await ytRes.json();
+        if (ytData.results && ytData.results.length > 0) {
+          return { ...track, ...ytData.results[0] };
+        }
+      }
+    } catch (e) {
+      console.warn('Track pre-resolution failed:', e);
+    }
+    return track;
+  };
 
   // Play a specific song (handles both YouTube, direct CDN audio, and auto-resolving Spotify tracks)
   const playSong = async (song, newQueue = null, options = {}) => {
@@ -411,22 +648,7 @@ export function MusicProvider({ children }) {
     // Prioritize Studio 320k direct master audio streams over YouTube embeds
     let activeSong = song;
     if (!activeSong.streamUrl) {
-      try {
-        const q = encodeURIComponent(`${activeSong.title} ${activeSong.artist || ''}`);
-        const resolveRes = await fetch(`/api/search?q=${q}`);
-        const resolveData = await resolveRes.json();
-        if (resolveData.results && resolveData.results.length > 0) {
-          activeSong = { ...activeSong, ...resolveData.results[0], source: 'saavn' };
-        } else if (!activeSong.youtubeId) {
-          const ytRes = await fetch(`/api/yt-search?q=${q}`);
-          const ytData = await ytRes.json();
-          if (ytData.results && ytData.results.length > 0) {
-            activeSong = { ...activeSong, ...ytData.results[0] };
-          }
-        }
-      } catch (e) {
-        console.warn('Track resolution failed:', e);
-      }
+      activeSong = await resolveTrackStreamUrl(activeSong);
     }
 
     // Register into anti-repeat memory window
@@ -440,11 +662,12 @@ export function MusicProvider({ children }) {
     }
 
     // Update queue with deduplication
-    let targetQueue = queue;
+    let targetQueue = queueRef.current || [];
     if (options.isFromSearch) {
       // From search: initialize with activeSong and immediately build the smart mood/genre radio queue
       targetQueue = [activeSong];
       setQueue(targetQueue);
+      queueRef.current = targetQueue;
 
       fetch('/api/radio/similar-queue', {
         method: 'POST',
@@ -459,7 +682,9 @@ export function MusicProvider({ children }) {
           if (data && Array.isArray(data.songs) && data.songs.length > 0) {
             const smartQueue = deduplicateQueue(data.songs);
             setQueue(smartQueue);
+            queueRef.current = smartQueue;
             setQueueIndex(0);
+            queueIndexRef.current = 0;
             if (data.moodLabel) setRadioMoodLabel(data.moodLabel);
           }
         })
@@ -467,59 +692,85 @@ export function MusicProvider({ children }) {
     } else if (newQueue && Array.isArray(newQueue)) {
       targetQueue = deduplicateQueue(newQueue);
       setQueue(targetQueue);
+      queueRef.current = targetQueue;
       setRadioMoodLabel('');
-    } else if (queue.length === 0 || !queue.some(s => s.id === activeSong.id)) {
-      targetQueue = deduplicateQueue([activeSong, ...queue.filter(s => s.id !== activeSong.id)]);
+    } else if (targetQueue.length === 0 || !targetQueue.some(s => s.id === activeSong.id)) {
+      targetQueue = deduplicateQueue([activeSong, ...targetQueue.filter(s => s.id !== activeSong.id)]);
       setQueue(targetQueue);
+      queueRef.current = targetQueue;
     }
 
     const index = targetQueue.findIndex(s => s.id === activeSong.id);
-    setQueueIndex(index !== -1 ? index : 0);
+    const resolvedIndex = index !== -1 ? index : 0;
+    setQueueIndex(resolvedIndex);
+    queueIndexRef.current = resolvedIndex;
+
     setCurrentTrack(activeSong);
+    currentTrackRef.current = activeSong;
+
     setCurrentTime(0);
+    currentTimeRef.current = 0;
     accumulatedListenSecondsRef.current = 0;
     recordedTrackIdRef.current = null;
-    if (activeSong.duration) setDuration(activeSong.duration);
+    if (activeSong.duration) {
+      setDuration(activeSong.duration);
+      durationRef.current = activeSong.duration;
+    }
 
     // Proactive lookahead: If queue is running low, pre-fetch upcoming tracks
-    if (autoplayEnabled && targetQueue.length - index <= 3) {
+    if (autoplayEnabledRef.current && targetQueue.length - resolvedIndex <= 3) {
       prefetchAutoplayTracks(activeSong);
     }
 
+    // Proactive stream pre-resolution: resolve the next upcoming song in advance
+    const nextCandidate = targetQueue[resolvedIndex + 1];
+    if (nextCandidate && !nextCandidate.streamUrl) {
+      resolveTrackStreamUrl(nextCandidate).then(resolved => {
+        if (resolved && resolved.streamUrl) {
+          setQueue(prevQ => {
+            const copy = [...prevQ];
+            const cIdx = copy.findIndex(s => s.id === resolved.id);
+            if (cIdx !== -1) {
+              copy[cIdx] = resolved;
+              queueRef.current = copy;
+            }
+            return copy;
+          });
+        }
+      }).catch(() => {});
+    }
+
     if (activeSong.streamUrl) {
-      // 1. Direct Lossless Studio 320k CDN Playback (Pure audio, zero embed restrictions, zero ads)
+      // 1. Direct Lossless Studio 320k CDN Playback
       if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
         ytPlayerRef.current.pauseVideo();
       }
       try {
         const audio = audioRef.current;
         const targetVol = 1.0;
-        // Smooth micro fade-out if already playing to eliminate abrupt audio snaps
-        if (!audio.paused && audio.src) {
-          try {
-            audio.volume = targetVol * 0.5;
-            await new Promise(r => setTimeout(r, 35));
-            audio.volume = 0;
-            await new Promise(r => setTimeout(r, 25));
-          } catch (e) {}
-        }
+
+        // Reset and assign stream URL directly without setTimeout delay
+        audio.pause();
         audio.src = activeSong.streamUrl;
         audio.currentTime = 0;
-        audio.volume = 0;
-        await audio.play();
-        setIsPlaying(true);
-        // Smooth micro fade-in ramp
-        try {
-          for (const ratio of [0.25, 0.55, 0.85, 1.0]) {
-            await new Promise(r => setTimeout(r, 35));
-            audio.volume = targetVol * ratio;
-          }
-        } catch (e) {
-          audio.volume = targetVol;
+        audio.volume = targetVol;
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          await playPromise;
         }
+        setIsPlaying(true);
+        isPlayingRef.current = true;
       } catch (err) {
-        console.error('Audio play failed:', err.message);
+        console.error('Audio play failed:', err?.message || err);
         setIsPlaying(false);
+        isPlayingRef.current = false;
+        // Auto-skip to next track if unplayable
+        setTimeout(() => {
+          if (isPlayingRef.current || (typeof document !== 'undefined' && document.hidden)) {
+            playNextRef.current?.();
+          }
+        }, 1200);
       }
     } else if (activeSong.source === 'youtube' || activeSong.youtubeId) {
       // 2. Fallback to YouTube Player only when direct stream is unavailable
@@ -528,13 +779,13 @@ export function MusicProvider({ children }) {
         ytPlayerRef.current.loadVideoById(activeSong.youtubeId);
       }
       setIsPlaying(true);
+      isPlayingRef.current = true;
     }
   };
 
-
   // Autoplay prefetch: smart mood & genre radio continuity
   const prefetchAutoplayTracks = async (seed) => {
-    if (!autoplayEnabled || isPrefetchingRef.current || !seed) return;
+    if (!autoplayEnabledRef.current || isPrefetchingRef.current || !seed) return;
     isPrefetchingRef.current = true;
 
     try {
@@ -551,7 +802,9 @@ export function MusicProvider({ children }) {
           const existingIds = new Set(prevQueue.map(s => s.id));
           const toAdd = songs.filter(s => !existingIds.has(s.id) && s.id !== seed.id).slice(0, 8);
           if (toAdd.length === 0) return prevQueue;
-          return [...prevQueue, ...toAdd];
+          const updated = [...prevQueue, ...toAdd];
+          queueRef.current = updated;
+          return updated;
         });
         if (data.moodLabel) setRadioMoodLabel(data.moodLabel);
       }
@@ -562,49 +815,60 @@ export function MusicProvider({ children }) {
     }
   };
 
-
   const togglePlay = () => {
-    if (!currentTrack) return;
+    const activeTrack = currentTrackRef.current;
+    if (!activeTrack) return;
 
-    if (currentTrack.source === 'youtube' || currentTrack.youtubeId) {
-      if (isPlaying) {
+    if (activeTrack.source === 'youtube' || activeTrack.youtubeId) {
+      if (isPlayingRef.current) {
         ytPlayerRef.current?.pauseVideo();
         setIsPlaying(false);
+        isPlayingRef.current = false;
       } else {
         if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === 'function') {
           ytPlayerRef.current.playVideo();
           setIsPlaying(true);
+          isPlayingRef.current = true;
         } else {
-          playSong(currentTrack, queue);
+          playSong(activeTrack, queueRef.current);
         }
       }
     } else {
       const audio = audioRef.current;
-      if (isPlaying) {
+      if (isPlayingRef.current) {
         audio.pause();
         setIsPlaying(false);
+        isPlayingRef.current = false;
       } else {
         const currentSrc = audio.src || '';
         const needsSetSrc = !currentSrc || currentSrc === window.location.href || currentSrc.endsWith('/');
         if (needsSetSrc) {
-          if (currentTrack.streamUrl) {
-            audio.src = currentTrack.streamUrl;
-            if (currentTime > 0) audio.currentTime = currentTime;
+          if (activeTrack.streamUrl) {
+            audio.src = activeTrack.streamUrl;
+            if (currentTimeRef.current > 0) audio.currentTime = currentTimeRef.current;
+            audio.volume = 1.0;
             audio.play()
-              .then(() => setIsPlaying(true))
+              .then(() => {
+                setIsPlaying(true);
+                isPlayingRef.current = true;
+              })
               .catch(e => {
                 console.warn('Direct stream resume failed, re-resolving:', e);
-                playSong(currentTrack, queue);
+                playSong(activeTrack, queueRef.current);
               });
           } else {
-            playSong(currentTrack, queue);
+            playSong(activeTrack, queueRef.current);
           }
         } else {
+          audio.volume = 1.0;
           audio.play()
-            .then(() => setIsPlaying(true))
+            .then(() => {
+              setIsPlaying(true);
+              isPlayingRef.current = true;
+            })
             .catch(e => {
               console.warn('Play error:', e);
-              playSong(currentTrack, queue);
+              playSong(activeTrack, queueRef.current);
             });
         }
       }
@@ -613,7 +877,8 @@ export function MusicProvider({ children }) {
 
   const seekTo = (seconds) => {
     setCurrentTime(seconds);
-    if (currentTrack?.source === 'youtube') {
+    currentTimeRef.current = seconds;
+    if (currentTrackRef.current?.source === 'youtube') {
       ytPlayerRef.current?.seekTo(seconds, true);
     } else {
       audioRef.current.currentTime = seconds;
@@ -621,51 +886,72 @@ export function MusicProvider({ children }) {
   };
 
   const playNext = async () => {
-    if (queue.length === 0) return;
+    const currentQ = queueRef.current || [];
+    const currentIndex = queueIndexRef.current;
+    const currentRepeat = repeatModeRef.current;
+    const currentShuffle = isShuffleRef.current;
+    const currentT = currentTrackRef.current;
+    const currentPos = currentTimeRef.current;
+
+    if (currentQ.length === 0) return;
 
     // Register skip penalty if user skipped within 15 seconds
-    if (currentTime < 15 && currentTrack?.artist) {
-      const primary = currentTrack.artist.split(/[,&]/)[0].trim();
+    if (currentPos < 15 && currentT?.artist) {
+      const primary = currentT.artist.split(/[,&]/)[0].trim();
       if (primary && !skippedArtistsRef.current.includes(primary)) {
         skippedArtistsRef.current = [primary, ...skippedArtistsRef.current].slice(0, 10);
       }
     }
 
-    if (repeatMode === 'one') {
+    if (currentRepeat === 'one') {
       seekTo(0);
-      togglePlay();
+      if (currentT?.source === 'youtube') {
+        ytPlayerRef.current?.playVideo();
+      } else {
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(() => {});
+      }
+      setIsPlaying(true);
+      isPlayingRef.current = true;
       return;
     }
 
     let nextIndex;
-    if (isShuffle) {
-      nextIndex = Math.floor(Math.random() * queue.length);
+    if (currentShuffle) {
+      if (currentQ.length > 1) {
+        do {
+          nextIndex = Math.floor(Math.random() * currentQ.length);
+        } while (nextIndex === currentIndex && currentQ.length > 1);
+      } else {
+        nextIndex = 0;
+      }
     } else {
-      nextIndex = queueIndex + 1;
+      nextIndex = currentIndex + 1;
     }
 
-    if (nextIndex < queue.length) {
-      playSong(queue[nextIndex], queue);
+    if (nextIndex < currentQ.length) {
+      playSong(currentQ[nextIndex], currentQ);
       // Trigger lookahead prefetch if queue is getting low
-      if (queue.length - nextIndex <= 3) {
-        prefetchAutoplayTracks(queue[nextIndex]);
+      if (currentQ.length - nextIndex <= 3) {
+        prefetchAutoplayTracks(currentQ[nextIndex]);
       }
-    } else if (autoplayEnabled && currentTrack) {
+    } else if (autoplayEnabledRef.current && currentT) {
       // Reached end of current queue: fetch more songs matching the current track's mood/genre
       try {
         const res = await fetch('/api/radio/similar-queue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ seedSong: currentTrack })
+          body: JSON.stringify({ seedSong: currentT })
         });
         const data = await res.json();
         const items = data.songs || [];
-        const existingIds = new Set(queue.map(s => s.id));
-        const newMatching = items.filter(s => !existingIds.has(s.id) && s.id !== currentTrack.id);
+        const existingIds = new Set(currentQ.map(s => s.id));
+        const newMatching = items.filter(s => !existingIds.has(s.id) && s.id !== currentT.id);
 
         if (newMatching.length > 0) {
-          const combinedQueue = deduplicateQueue([...queue, ...newMatching]);
+          const combinedQueue = deduplicateQueue([...currentQ, ...newMatching]);
           setQueue(combinedQueue);
+          queueRef.current = combinedQueue;
           if (data.moodLabel) setRadioMoodLabel(data.moodLabel);
           playSong(newMatching[0], combinedQueue);
           return;
@@ -674,55 +960,83 @@ export function MusicProvider({ children }) {
         console.warn('Autoplay fetch failed:', err);
       }
 
-      if (repeatMode === 'all') {
-        playSong(queue[0], queue);
+      if (currentRepeat === 'all') {
+        playSong(currentQ[0], currentQ);
       } else {
         setIsPlaying(false);
+        isPlayingRef.current = false;
       }
     } else {
-      if (repeatMode === 'all') {
-        playSong(queue[0], queue);
+      if (currentRepeat === 'all') {
+        playSong(currentQ[0], currentQ);
       } else {
         setIsPlaying(false);
+        isPlayingRef.current = false;
       }
     }
   };
 
   const playPrev = () => {
-    if (currentTime > 3) {
+    const currentPos = currentTimeRef.current;
+    if (currentPos > 3) {
       seekTo(0);
       return;
     }
-    if (queue.length === 0) return;
+    const currentQ = queueRef.current || [];
+    const currentIndex = queueIndexRef.current;
+    if (currentQ.length === 0) return;
 
-    let prevIndex = queueIndex - 1;
+    let prevIndex = currentIndex - 1;
     if (prevIndex >= 0) {
-      playSong(queue[prevIndex], queue);
+      playSong(currentQ[prevIndex], currentQ);
     } else {
-      seekTo(0);
+      if (repeatModeRef.current === 'all') {
+        playSong(currentQ[currentQ.length - 1], currentQ);
+      } else {
+        seekTo(0);
+      }
     }
   };
 
   const handleSongEnded = () => {
-    // If a track finished playback and qualified (listened >= 45s or completed full track duration)
-    if (currentTrack && recordedTrackIdRef.current !== currentTrack.id) {
-      if (currentTime >= 45 || accumulatedListenSecondsRef.current >= 45 || (duration > 0 && currentTime >= duration * 0.85)) {
-        recordedTrackIdRef.current = currentTrack.id;
-        recordRecentSong(currentTrack);
+    if (isAdvancingTrackRef.current) return; // Prevent double triggers
+    isAdvancingTrackRef.current = true;
+    const activeTrack = currentTrackRef.current;
+    const currentPos = currentTimeRef.current;
+    const currentDur = durationRef.current;
+    const currentRepeat = repeatModeRef.current;
+
+    if (activeTrack && recordedTrackIdRef.current !== activeTrack.id) {
+      if (currentPos >= 45 || accumulatedListenSecondsRef.current >= 45 || (currentDur > 0 && currentPos >= currentDur * 0.85)) {
+        recordedTrackIdRef.current = activeTrack.id;
+        recordRecentSong(activeTrack);
       }
     }
 
-    if (repeatMode === 'one') {
+    if (currentRepeat === 'one') {
       seekTo(0);
-      if (currentTrack?.source === 'youtube') {
+      if (activeTrack?.source === 'youtube') {
         ytPlayerRef.current?.playVideo();
       } else {
+        audioRef.current.currentTime = 0;
         audioRef.current.play().catch(() => {});
       }
+      setIsPlaying(true);
+      isPlayingRef.current = true;
     } else {
       playNext();
     }
+    // Reset advancing flag after short delay to allow next track load
+    setTimeout(() => { isAdvancingTrackRef.current = false; }, 500);
+
   };
+
+  // Synchronize function refs on every render so external callers never hold stale closures
+  playNextRef.current = playNext;
+  playPrevRef.current = playPrev;
+  handleSongEndedRef.current = handleSongEnded;
+  seekToRef.current = seekTo;
+  togglePlayRef.current = togglePlay;
 
   const toggleLike = async (song) => {
     if (!song || !song.id) return;

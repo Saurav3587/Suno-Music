@@ -187,16 +187,23 @@ export default function App() {
     let removeCapacitorListener = null;
 
     // Register Capacitor native Android hardware back button
-    CapacitorApp.addListener('backButton', () => {
-      const handled = handleUniversalBack();
-      if (!handled) {
-        CapacitorApp.exitApp();
+    try {
+      const listenerRes = CapacitorApp.addListener('backButton', () => {
+        const handled = handleUniversalBack();
+        if (!handled) {
+          CapacitorApp.exitApp();
+        }
+      });
+      if (listenerRes && typeof listenerRes.then === 'function') {
+        listenerRes.then(handler => {
+          removeCapacitorListener = handler;
+        }).catch(() => {});
+      } else if (listenerRes && typeof listenerRes.remove === 'function') {
+        removeCapacitorListener = listenerRes;
       }
-    }).then(handler => {
-      removeCapacitorListener = handler;
-    }).catch(err => {
-      console.log('Capacitor backButton bridge:', err);
-    });
+    } catch (err) {
+      console.warn('Capacitor backButton bridge:', err);
+    }
 
     // Browser popstate handler (for browser back navigation)
     const handlePopState = (e) => {
@@ -215,7 +222,12 @@ export default function App() {
     };
   }, [handleUniversalBack]);
 
-  // Strictly gate the entire app: Spotify requires sign up or log in to open the app
+  // 1. Show Animated Splash Screen on app launch
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
+
+  // 2. Strictly gate the entire app: Spotify requires sign up or log in to open the app
   if (!isLoggedIn) {
     return <AuthScreen />;
   }
@@ -332,11 +344,6 @@ export default function App() {
           onClose={() => setIsImportModalOpen(false)}
           onOpenPlaylist={handleOpenPlaylist}
         />
-      )}
-
-      {/* Animated App Splash Loading Screen */}
-      {showSplash && (
-        <SplashScreen onFinish={() => setShowSplash(false)} />
       )}
     </div>
   );

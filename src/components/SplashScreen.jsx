@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import logoImg from '../assets/logo.png';
 
 export default function SplashScreen({ onFinish }) {
   const [isExiting, setIsExiting] = useState(false);
@@ -111,7 +112,7 @@ export default function SplashScreen({ onFinish }) {
             }}
           >
             <img
-              src="/logo.png"
+              src={logoImg}
               alt="Suno Music Logo"
               style={{
                 width: '100%',
