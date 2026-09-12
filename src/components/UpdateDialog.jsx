@@ -1,8 +1,8 @@
-﻿import React, { useState, useEffect } from "react";
-import { downloadBundle, applyUpdate } from "../utils/updater";
+import React, { useState } from "react";
+import { startAppUpdate } from "../utils/updater";
 
 export default function UpdateDialog({ versionInfo, currentVersion, onSkip }) {
-  const [status, setStatus] = useState("idle"); // idle | downloading | applying | done | error
+  const [status, setStatus] = useState("idle"); // idle | downloading | installing | done | error
   const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -11,14 +11,18 @@ export default function UpdateDialog({ versionInfo, currentVersion, onSkip }) {
   const handleUpdate = async () => {
     setStatus("downloading");
     setProgress(0);
+    setErrorMsg("");
     try {
-      const base64Zip = await downloadBundle((pct) => setProgress(pct));
-      setStatus("applying");
-      await applyUpdate(base64Zip, version);
-      setStatus("done");
+      await startAppUpdate(versionInfo, (pct) => {
+        setProgress(pct);
+        if (pct >= 100) {
+          setStatus("installing");
+        }
+      });
+      setStatus("installing");
     } catch (err) {
-      console.error("Update failed:", err);
-      setErrorMsg(err?.message || "Update failed. Please try again.");
+      console.error("In-app update failed:", err);
+      setErrorMsg(err?.message || "Download failed. Please check your connection and retry.");
       setStatus("error");
     }
   };
@@ -148,7 +152,8 @@ export default function UpdateDialog({ versionInfo, currentVersion, onSkip }) {
         )}
 
         {/* Progress Bar (shown during download) */}
-        {(status === "downloading" || status === "applying") && (
+        {/* Progress Bar (shown during download) */}
+        {(status === "downloading" || status === "installing") && (
           <div style={{ marginBottom: "20px" }}>
             <div
               style={{
@@ -158,10 +163,10 @@ export default function UpdateDialog({ versionInfo, currentVersion, onSkip }) {
               }}
             >
               <span style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.6)" }}>
-                {status === "downloading" ? "Downloading update…" : "Applying update…"}
+                {status === "downloading" ? "Downloading update…" : "Opening Android installer…"}
               </span>
               <span style={{ fontSize: "0.8rem", color: "#a238ff", fontWeight: 700 }}>
-                {status === "applying" ? "100%" : `${progress}%`}
+                {status === "installing" ? "100%" : `${progress}%`}
               </span>
             </div>
             <div
@@ -175,7 +180,7 @@ export default function UpdateDialog({ versionInfo, currentVersion, onSkip }) {
               <div
                 style={{
                   height: "100%",
-                  width: `${status === "applying" ? 100 : progress}%`,
+                  width: `${status === "installing" ? 100 : progress}%`,
                   background: "linear-gradient(90deg, #ff2e93, #a238ff)",
                   borderRadius: "99px",
                   transition: "width 0.3s ease",
@@ -207,21 +212,21 @@ export default function UpdateDialog({ versionInfo, currentVersion, onSkip }) {
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
           <button
             onClick={status === "error" ? handleUpdate : status === "idle" ? handleUpdate : undefined}
-            disabled={status === "downloading" || status === "applying" || status === "done"}
+            disabled={status === "downloading" || status === "installing" || status === "done"}
             style={{
               width: "100%",
               padding: "16px",
               borderRadius: "16px",
               border: "none",
               background:
-                status === "downloading" || status === "applying"
+                status === "downloading" || status === "installing"
                   ? "rgba(255,255,255,0.06)"
                   : "linear-gradient(135deg, #ff2e93 0%, #a238ff 100%)",
-              color: status === "downloading" || status === "applying" ? "rgba(255,255,255,0.4)" : "#fff",
+              color: status === "downloading" || status === "installing" ? "rgba(255,255,255,0.4)" : "#fff",
               fontSize: "1rem",
               fontWeight: 700,
               cursor:
-                status === "downloading" || status === "applying" ? "not-allowed" : "pointer",
+                status === "downloading" || status === "installing" ? "not-allowed" : "pointer",
               transition: "all 0.2s ease",
               letterSpacing: "-0.2px",
               boxShadow:
@@ -233,12 +238,12 @@ export default function UpdateDialog({ versionInfo, currentVersion, onSkip }) {
           >
             {status === "idle" && "⬇️  Update Now"}
             {status === "downloading" && "Downloading…"}
-            {status === "applying" && "Applying Update…"}
-            {status === "done" && "✅ Restarting…"}
+            {status === "installing" && "📦 Opening Installer…"}
+            {status === "done" && "✅ Ready"}
             {status === "error" && "🔄  Retry Update"}
           </button>
 
-          {!forceUpdate && status !== "downloading" && status !== "applying" && status !== "done" && (
+          {!forceUpdate && status !== "downloading" && status !== "installing" && status !== "done" && (
             <button
               onClick={onSkip}
               style={{

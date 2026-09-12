@@ -1,8 +1,20 @@
-﻿import { Filesystem, Directory } from "@capacitor/filesystem";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
+
+export const AppUpdate = registerPlugin("AppUpdate");
 
 // The current app version is injected at build time by Vite
 export const CURRENT_VERSION = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "1.0.0";
+
+/**
+ * Returns the currently active backend URL
+ */
+export function getActiveBackendUrl() {
+  return (
+    localStorage.getItem("suno_custom_backend") ||
+    localStorage.getItem("suno_active_backend") ||
+    "https://suno-music-x6c4.onrender.com"
+  );
+}
 
 /**
  * Compares two semver strings, returns true if remoteVersion > localVersion
@@ -23,7 +35,7 @@ export function isNewerVersion(localVersion, remoteVersion) {
 
 /**
  * Fetches version info from the backend.
- * Returns { version, releaseNotes, forceUpdate } or null on failure.
+ * Returns { version, releaseNotes, forceUpdate, apkUrl } or null on failure.
  */
 export async function checkForUpdate() {
   try {
@@ -38,75 +50,49 @@ export async function checkForUpdate() {
 }
 
 /**
- * Downloads the update bundle from the backend with progress reporting.
+ * Starts the in-app update process.
+ * On Android, downloads APK natively in background with live progress and launches package installer.
  * onProgress(percent: number) is called during download.
- * Returns the downloaded content as a base64 string.
  */
-export async function downloadBundle(onProgress) {
-  const res = await fetch("/api/update/bundle", { cache: "no-store" });
-  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+export async function startAppUpdate(versionInfo, onProgress) {
+  const backend = getActiveBackendUrl();
+  const rawApkUrl = versionInfo?.apkUrl || "/api/update/apk";
+  const apkDownloadUrl = rawApkUrl.startsWith("http")
+    ? rawApkUrl
+    : `${backend.replace(/\/+$/, "")}/${rawApkUrl.replace(/^\/+/, "")}`;
 
-  const contentLength = res.headers.get("Content-Length");
-  const total = contentLength ? parseInt(contentLength, 10) : 0;
-  let loaded = 0;
+  if (Capacitor.isNativePlatform()) {
+    let progressListener = null;
 
-  const reader = res.body.getReader();
-  const chunks = [];
+    try {
+      if (onProgress) {
+        progressListener = await AppUpdate.addListener("downloadProgress", (info) => {
+          if (typeof info?.progress === "number") {
+            onProgress(info.progress);
+          }
+        });
+      }
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    loaded += value.length;
-    if (total > 0 && onProgress) {
-      onProgress(Math.round((loaded / total) * 100));
+      await AppUpdate.downloadAndInstall({ url: apkDownloadUrl });
+      return true;
+    } finally {
+      if (progressListener) {
+        try { progressListener.remove(); } catch (_) {}
+      }
     }
-  }
-
-  // Combine all chunks into a single Uint8Array then convert to base64
-  const combined = new Uint8Array(loaded);
-  let offset = 0;
-  for (const chunk of chunks) {
-    combined.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  // Convert to base64 for Filesystem API
-  let binary = "";
-  const len = combined.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(combined[i]);
-  }
-  return btoa(binary);
-}
-
-/**
- * Saves the downloaded bundle zip to the app's data directory,
- * then records the new version. The app will reload on next start.
- * NOTE: Full in-place web bundle replacement requires native plugin support.
- * For now we store the bundle and mark it ready. App reload triggers it.
- */
-export async function applyUpdate(base64Zip, newVersion) {
-  if (!Capacitor.isNativePlatform()) {
-    // In browser/dev mode, just mark the version and reload
-    localStorage.setItem("suno_app_version", newVersion);
-    window.location.reload();
-    return;
-  }
-
-  try {
-    // Save zip to app's data directory
-    await Filesystem.writeFile({
-      path: "suno-update.zip",
-      data: base64Zip,
-      directory: Directory.Data,
-    });
-    // Mark the new version as installed
-    localStorage.setItem("suno_app_version", newVersion);
-    // Reload — Capacitor will pick up from the installed bundle
-    window.location.reload();
-  } catch (err) {
-    console.error("Apply update error:", err);
-    throw err;
+  } else {
+    // Browser fallback: direct download
+    window.open(apkDownloadUrl, "_blank");
+    return true;
   }
 }
+
+// Backward compatibility stubs
+export async function downloadBundle(onProgress) {
+  return startAppUpdate({}, onProgress);
+}
+
+export async function applyUpdate() {
+  return true;
+}
+

@@ -1,7 +1,7 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.2",
   "minVersion": "1.0.0",
-  "releaseNotes": "• Fixed offline search issue when laptop is closed\n• Supercharged cloud fallback with instant streaming and search\n• Faster app load and resilient playback",
+  "releaseNotes": "• Native in-app updater (installs updates completely inside app)\n• Fixed update notification loop\n• Bug fixes and playback performance enhancements",
   "forceUpdate": false,
   "apkUrl": "/api/update/apk"
 }
