@@ -231,6 +231,64 @@ app.get('/api/song/:id', async (req, res) => {
   }
 });
 
+// Proxy Saavn audio when a browser or WebView cannot decode the CDN URL directly.
+app.get('/api/audio', async (req, res) => {
+  const sourceUrl = req.query.url;
+  if (!sourceUrl || typeof sourceUrl !== 'string') {
+    return res.status(400).json({ error: 'Missing audio URL' });
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(sourceUrl);
+  } catch {
+    return res.status(400).json({ error: 'Invalid audio URL' });
+  }
+
+  if (parsedUrl.protocol !== 'https:' || !parsedUrl.hostname.endsWith('.saavncdn.com')) {
+    return res.status(403).json({ error: 'Audio host is not allowed' });
+  }
+
+  const abortController = new AbortController();
+  req.on('close', () => {
+    if (!res.writableEnded) {
+      abortController.abort();
+    }
+  });
+
+  try {
+    const headers = { 'User-Agent': 'Suno Music/1.0' };
+    if (req.headers.range) headers.Range = req.headers.range;
+    const upstream = await fetch(parsedUrl, {
+      headers,
+      signal: abortController.signal
+    });
+
+    if (!upstream.ok && upstream.status !== 206) {
+      return res.status(upstream.status).end();
+    }
+
+    res.status(upstream.status);
+    for (const header of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'etag']) {
+      const value = upstream.headers.get(header);
+      if (value) res.setHeader(header, value);
+    }
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+
+    if (upstream.body) {
+      for await (const chunk of upstream.body) {
+        if (res.writableEnded || req.destroyed) break;
+        res.write(chunk);
+      }
+    }
+    res.end();
+  } catch (err) {
+    if (err.name === 'AbortError' || req.destroyed) return;
+    console.error('Audio proxy error:', err.message);
+    if (!res.headersSent) res.status(502).json({ error: 'Audio source unavailable' });
+  }
+});
+
 // Get song lyrics
 app.get('/api/lyrics', async (req, res) => {
   const songId = req.query.id;

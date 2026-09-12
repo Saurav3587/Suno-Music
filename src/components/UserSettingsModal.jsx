@@ -16,11 +16,13 @@ import {
   Trash2
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
+import { useMusic } from '../context/MusicContext';
 import ImageCropModal from './ImageCropModal';
 
 const AVATARS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
 
 export default function UserSettingsModal({ onClose }) {
+  const { isPlaying, togglePlay } = useMusic();
   const {
     userName,
     setUserName,
