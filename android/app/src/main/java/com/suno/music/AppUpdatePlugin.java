@@ -2,6 +2,8 @@ package com.suno.music;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
@@ -17,6 +19,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.List;
 
 @CapacitorPlugin(name = "AppUpdate")
 public class AppUpdatePlugin extends Plugin {
@@ -35,17 +38,56 @@ public class AppUpdatePlugin extends Plugin {
     @PluginMethod
     public void openInstallPermissionSettings(PluginCall call) {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Intent intent = new Intent(
-                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    Uri.parse("package:" + getContext().getPackageName())
-                );
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                getContext().startActivity(intent);
-            }
+            openSettingsInternal(getContext());
             call.resolve();
         } catch (Exception e) {
             call.reject("Failed to open install settings: " + e.getMessage(), e);
+        }
+    }
+
+    private void openSettingsInternal(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent intent = new Intent(
+                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:" + context.getPackageName())
+            );
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        }
+    }
+
+    private File getApkFile(Context context) {
+        File dir = context.getExternalCacheDir() != null ? context.getExternalCacheDir() : context.getCacheDir();
+        return new File(dir, "suno-update.apk");
+    }
+
+    @PluginMethod
+    public void installDownloadedApk(PluginCall call) {
+        try {
+            Context context = getContext();
+            File apkFile = getApkFile(context);
+
+            if (!apkFile.exists() || apkFile.length() == 0) {
+                call.reject("Update APK not found. Please tap Update to download again.");
+                return;
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (!context.getPackageManager().canRequestPackageInstalls()) {
+                    openSettingsInternal(context);
+                    JSObject ret = new JSObject();
+                    ret.put("needsPermission", true);
+                    call.resolve(ret);
+                    return;
+                }
+            }
+
+            triggerInstall(apkFile);
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Failed to trigger installation: " + e.getMessage(), e);
         }
     }
 
@@ -65,8 +107,7 @@ public class AppUpdatePlugin extends Plugin {
 
             try {
                 Context context = getContext();
-                File cacheDir = context.getCacheDir();
-                File apkFile = new File(cacheDir, "suno-update.apk");
+                File apkFile = getApkFile(context);
 
                 if (apkFile.exists()) {
                     apkFile.delete();
@@ -131,7 +172,29 @@ public class AppUpdatePlugin extends Plugin {
 
                 notifyProgress(100);
 
-                // Launch package installer
+                // Make file globally readable for package installer
+                apkFile.setReadable(true, false);
+
+                // Check permission on Android 8.0+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    if (!context.getPackageManager().canRequestPackageInstalls()) {
+                        if (getActivity() != null) {
+                            getActivity().runOnUiThread(() -> {
+                                JSObject data = new JSObject();
+                                data.put("needsPermission", true);
+                                notifyListeners("permissionNeeded", data);
+                            });
+                        }
+                        openSettingsInternal(context);
+
+                        JSObject res = new JSObject();
+                        res.put("needsPermission", true);
+                        call.resolve(res);
+                        return;
+                    }
+                }
+
+                // Permission granted: launch package installer immediately
                 triggerInstall(apkFile);
 
                 JSObject res = new JSObject();
@@ -175,6 +238,15 @@ public class AppUpdatePlugin extends Plugin {
         intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+        // Explicitly grant read URI permission to all resolving package installer packages
+        PackageManager pm = context.getPackageManager();
+        List<ResolveInfo> resInfoList = pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
+        for (ResolveInfo resolveInfo : resInfoList) {
+            String packageName = resolveInfo.activityInfo.packageName;
+            context.grantUriPermission(packageName, apkUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        }
 
         context.startActivity(intent);
     }

@@ -1,25 +1,84 @@
-import React, { useState } from "react";
-import { startAppUpdate } from "../utils/updater";
+import React, { useState, useEffect } from "react";
+import {
+  startAppUpdate,
+  installDownloadedApk,
+  openInstallSettings,
+  canInstallPackages,
+  AppUpdate,
+} from "../utils/updater";
 
 export default function UpdateDialog({ versionInfo, currentVersion, onSkip }) {
-  const [status, setStatus] = useState("idle"); // idle | downloading | installing | done | error
+  const [status, setStatus] = useState("idle"); // idle | downloading | installing | needsPermission | done | error
   const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState("");
 
   const { version, releaseNotes, forceUpdate } = versionInfo;
+
+  useEffect(() => {
+    let permListener = null;
+    if (AppUpdate?.addListener) {
+      AppUpdate.addListener("permissionNeeded", () => {
+        setStatus("needsPermission");
+      })
+        .then((l) => {
+          permListener = l;
+        })
+        .catch(() => {});
+    }
+    return () => {
+      if (permListener && permListener.remove) {
+        try {
+          permListener.remove();
+        } catch (_) {}
+      }
+    };
+  }, []);
+
+  // When user returns to the app from Settings, auto-check if permission is now granted
+  useEffect(() => {
+    const handleFocus = async () => {
+      if (status === "needsPermission") {
+        const canInstall = await canInstallPackages();
+        if (canInstall) {
+          handleInstall();
+        }
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, [status]);
+
+  const handleInstall = async () => {
+    setStatus("installing");
+    try {
+      const res = await installDownloadedApk();
+      if (res?.needsPermission) {
+        setStatus("needsPermission");
+      }
+    } catch (err) {
+      console.error("Install failed:", err);
+      setErrorMsg(err?.message || "Could not launch installer. Tap to retry.");
+      setStatus("error");
+    }
+  };
 
   const handleUpdate = async () => {
     setStatus("downloading");
     setProgress(0);
     setErrorMsg("");
     try {
-      await startAppUpdate(versionInfo, (pct) => {
+      const res = await startAppUpdate(versionInfo, (pct) => {
         setProgress(pct);
-        if (pct >= 100) {
-          setStatus("installing");
-        }
       });
-      setStatus("installing");
+      if (res?.needsPermission) {
+        setStatus("needsPermission");
+      } else {
+        setStatus("installing");
+      }
     } catch (err) {
       console.error("In-app update failed:", err);
       setErrorMsg(err?.message || "Download failed. Please check your connection and retry.");
@@ -191,6 +250,26 @@ export default function UpdateDialog({ versionInfo, currentVersion, onSkip }) {
           </div>
         )}
 
+        {/* Permission Required State */}
+        {status === "needsPermission" && (
+          <div
+            style={{
+              background: "rgba(255, 179, 0, 0.12)",
+              border: "1px solid rgba(255, 179, 0, 0.3)",
+              borderRadius: "14px",
+              padding: "16px",
+              marginBottom: "20px",
+            }}
+          >
+            <div style={{ fontSize: "0.92rem", fontWeight: 700, color: "#ffb300", marginBottom: "6px" }}>
+              🔒 Install Permission Required
+            </div>
+            <p style={{ margin: "0 0 12px", fontSize: "0.83rem", color: "rgba(255,255,255,0.85)", lineHeight: 1.5 }}>
+              Android requires permission to install updates from within the app. Tap <strong>Open Settings</strong> below, toggle on <strong>"Allow from this source"</strong>, then return here and tap <strong>Install Now</strong>.
+            </p>
+          </div>
+        )}
+
         {/* Error State */}
         {status === "error" && (
           <div
@@ -210,38 +289,77 @@ export default function UpdateDialog({ versionInfo, currentVersion, onSkip }) {
 
         {/* Action Buttons */}
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <button
-            onClick={status === "error" ? handleUpdate : status === "idle" ? handleUpdate : undefined}
-            disabled={status === "downloading" || status === "installing" || status === "done"}
-            style={{
-              width: "100%",
-              padding: "16px",
-              borderRadius: "16px",
-              border: "none",
-              background:
-                status === "downloading" || status === "installing"
-                  ? "rgba(255,255,255,0.06)"
-                  : "linear-gradient(135deg, #ff2e93 0%, #a238ff 100%)",
-              color: status === "downloading" || status === "installing" ? "rgba(255,255,255,0.4)" : "#fff",
-              fontSize: "1rem",
-              fontWeight: 700,
-              cursor:
-                status === "downloading" || status === "installing" ? "not-allowed" : "pointer",
-              transition: "all 0.2s ease",
-              letterSpacing: "-0.2px",
-              boxShadow:
-                status === "idle" || status === "error"
-                  ? "0 8px 24px rgba(255,46,147,0.3)"
-                  : "none",
-              fontFamily: "var(--font-display, 'Outfit', sans-serif)",
-            }}
-          >
-            {status === "idle" && "⬇️  Update Now"}
-            {status === "downloading" && "Downloading…"}
-            {status === "installing" && "📦 Opening Installer…"}
-            {status === "done" && "✅ Ready"}
-            {status === "error" && "🔄  Retry Update"}
-          </button>
+          {status === "needsPermission" ? (
+            <>
+              <button
+                onClick={() => openInstallSettings()}
+                style={{
+                  width: "100%",
+                  padding: "16px",
+                  borderRadius: "16px",
+                  border: "none",
+                  background: "linear-gradient(135deg, #ffb300 0%, #ff8000 100%)",
+                  color: "#000",
+                  fontSize: "1rem",
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  boxShadow: "0 8px 24px rgba(255,179,0,0.3)",
+                  fontFamily: "var(--font-display, 'Outfit', sans-serif)",
+                }}
+              >
+                ⚙️  Open Settings
+              </button>
+              <button
+                onClick={handleInstall}
+                style={{
+                  width: "100%",
+                  padding: "14px",
+                  borderRadius: "16px",
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  background: "rgba(255,255,255,0.08)",
+                  color: "#fff",
+                  fontSize: "0.95rem",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                📦  Install Now
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={status === "error" ? handleUpdate : status === "idle" ? handleUpdate : undefined}
+              disabled={status === "downloading" || status === "installing" || status === "done"}
+              style={{
+                width: "100%",
+                padding: "16px",
+                borderRadius: "16px",
+                border: "none",
+                background:
+                  status === "downloading" || status === "installing"
+                    ? "rgba(255,255,255,0.06)"
+                    : "linear-gradient(135deg, #ff2e93 0%, #a238ff 100%)",
+                color: status === "downloading" || status === "installing" ? "rgba(255,255,255,0.4)" : "#fff",
+                fontSize: "1rem",
+                fontWeight: 700,
+                cursor:
+                  status === "downloading" || status === "installing" ? "not-allowed" : "pointer",
+                transition: "all 0.2s ease",
+                letterSpacing: "-0.2px",
+                boxShadow:
+                  status === "idle" || status === "error"
+                    ? "0 8px 24px rgba(255,46,147,0.3)"
+                    : "none",
+                fontFamily: "var(--font-display, 'Outfit', sans-serif)",
+              }}
+            >
+              {status === "idle" && "⬇️  Update Now"}
+              {status === "downloading" && "Downloading…"}
+              {status === "installing" && "📦 Opening Installer…"}
+              {status === "done" && "✅ Ready"}
+              {status === "error" && "🔄  Retry Update"}
+            </button>
+          )}
 
           {!forceUpdate && status !== "downloading" && status !== "installing" && status !== "done" && (
             <button

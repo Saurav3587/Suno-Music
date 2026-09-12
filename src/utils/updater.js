@@ -73,8 +73,8 @@ export async function startAppUpdate(versionInfo, onProgress) {
         });
       }
 
-      await AppUpdate.downloadAndInstall({ url: apkDownloadUrl });
-      return true;
+      const res = await AppUpdate.downloadAndInstall({ url: apkDownloadUrl });
+      return res;
     } finally {
       if (progressListener) {
         try { progressListener.remove(); } catch (_) {}
@@ -85,6 +85,30 @@ export async function startAppUpdate(versionInfo, onProgress) {
     window.open(apkDownloadUrl, "_blank");
     return true;
   }
+}
+
+export async function installDownloadedApk() {
+  if (Capacitor.isNativePlatform()) {
+    return await AppUpdate.installDownloadedApk();
+  }
+}
+
+export async function openInstallSettings() {
+  if (Capacitor.isNativePlatform()) {
+    return await AppUpdate.openInstallPermissionSettings();
+  }
+}
+
+export async function canInstallPackages() {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const res = await AppUpdate.canInstallPackages();
+      return Boolean(res?.canInstall);
+    } catch (_) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Backward compatibility stubs
