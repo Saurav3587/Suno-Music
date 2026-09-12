@@ -987,16 +987,3 @@ initDatabase().then(() => {
     console.log(`🎵 Suno Music Server listening on http://localhost:${PORT}`);
   });
 });
-
-// Also listen on port 3000 to automatically redirect or serve
-try {
-  const redirectServer = http.createServer((req, res) => {
-    res.writeHead(302, { Location: `http://${req.headers.host?.split(':')[0] || 'localhost'}:5173${req.url}` });
-    res.end();
-  });
-  redirectServer.listen(3000, '0.0.0.0', () => {
-    console.log('🔄 Port 3000 redirecting to http://localhost:5173');
-  });
-} catch (e) {
-  // Ignore if port 3000 is busy
-}
