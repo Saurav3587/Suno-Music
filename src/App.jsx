@@ -10,6 +10,8 @@ import UserSettingsModal from './components/UserSettingsModal';
 import ImportPlaylistModal from './components/ImportPlaylistModal';
 import SplashScreen from './components/SplashScreen';
 import AuthScreen from './components/AuthScreen';
+import UpdateDialog from './components/UpdateDialog';
+import { checkForUpdate, isNewerVersion, CURRENT_VERSION } from './utils/updater';
 
 import HomeView from './views/HomeView';
 import SearchView from './views/SearchView';
@@ -74,6 +76,25 @@ export default function App() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [pendingPlaylistId, setPendingPlaylistId] = useState(null);
   const [showSplash, setShowSplash] = useState(true);
+
+  // OTA Update state
+  const [updateInfo, setUpdateInfo] = useState(null);   // { version, releaseNotes, forceUpdate }
+  const [updateChecked, setUpdateChecked] = useState(false);
+
+  // Check for update silently after splash finishes
+  const handleSplashFinish = useCallback(async () => {
+    setShowSplash(false);
+    try {
+      const info = await checkForUpdate();
+      if (info && isNewerVersion(CURRENT_VERSION, info.version)) {
+        setUpdateInfo(info);
+      }
+    } catch (_) {
+      // Network error — silently skip update check
+    } finally {
+      setUpdateChecked(true);
+    }
+  }, []);
 
   const {
     currentTrack,
@@ -224,10 +245,21 @@ export default function App() {
 
   // 1. Show Animated Splash Screen on app launch
   if (showSplash) {
-    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+    return <SplashScreen onFinish={handleSplashFinish} />;
   }
 
-  // 2. Strictly gate the entire app: Spotify requires sign up or log in to open the app
+  // 2. Show Update Dialog if a newer version is available
+  if (updateInfo) {
+    return (
+      <UpdateDialog
+        versionInfo={updateInfo}
+        currentVersion={CURRENT_VERSION}
+        onSkip={() => setUpdateInfo(null)}
+      />
+    );
+  }
+
+  // 3. Strictly gate the entire app: Spotify requires sign up or log in to open the app
   if (!isLoggedIn) {
     return <AuthScreen />;
   }

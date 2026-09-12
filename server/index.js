@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import yts from 'yt-search';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { searchSongs, getTrendingSongs, getRomanticHits, getRotatedAcousticHits, generateAutoPlaylist } from './autoPlaylistService.js';
 import { normalizeSong } from './decrypt.js';
 import { getSpotifyCharts, parseSpotifyUrl, getSpotifyEntity, resolveTrackToPlayable, getOfficialPlaylistsList, getSpotifyPlaylistByKeyOrId } from './spotifyService.js';
@@ -10,6 +13,9 @@ import { hashPassword, comparePassword, generateToken, requireAuth, optionalAuth
 import { analyzeListeningSession, getAIRecommendationReasoning, interpretMoodRequest, isAIAvailable } from './llmService.js';
 import { generateSimilarMoodQueue } from './moodRadioService.js';
 import { searchAllPlaylists, getPlaylistDetails } from './playlistSearchService.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -1011,14 +1017,8 @@ app.post('/api/ai/chat', async (req, res) => {
   }
 });
 
-
-import path from 'path';
-import { fileURLToPath } from 'url';
-import http from 'http';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const distPath = path.resolve(__dirname, '../dist');
+
 
 // Serve built frontend statically
 app.use(express.static(distPath));
@@ -1044,4 +1044,42 @@ initDatabase().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🎵 Suno Music Server listening on http://localhost:${PORT}`);
   });
+});
+
+// ─── OTA In-App Update Endpoints ────────────────────────────────────────────
+
+// GET /api/version — Returns current app version info from app-version.json
+app.get('/api/version', (req, res) => {
+  try {
+    const versionPath = path.join(__dirname, 'app-version.json');
+    const raw = fs.readFileSync(versionPath, 'utf8');
+    const versionInfo = JSON.parse(raw);
+    res.json({ success: true, ...versionInfo });
+  } catch (err) {
+    console.error('Version endpoint error:', err);
+    res.status(500).json({ success: false, error: 'Could not read version info' });
+  }
+});
+
+// GET /api/update/bundle — Streams the update zip bundle to the client
+app.get('/api/update/bundle', (req, res) => {
+  try {
+    const bundlePath = path.join(__dirname, 'update-bundle.zip');
+    if (!fs.existsSync(bundlePath)) {
+      return res.status(404).json({ success: false, error: 'No update bundle available' });
+    }
+    const stat = fs.statSync(bundlePath);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Content-Disposition', 'attachment; filename="update-bundle.zip"');
+    const stream = fs.createReadStream(bundlePath);
+    stream.pipe(res);
+    stream.on('error', (err) => {
+      console.error('Bundle stream error:', err);
+      if (!res.headersSent) res.status(500).json({ success: false, error: 'Stream error' });
+    });
+  } catch (err) {
+    console.error('Update bundle endpoint error:', err);
+    res.status(500).json({ success: false, error: 'Could not serve update bundle' });
+  }
 });
