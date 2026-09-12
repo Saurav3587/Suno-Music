@@ -14,19 +14,20 @@ if (isNative) {
   const CANDIDATES = [
     localStorage.getItem('suno_custom_backend'),
     localStorage.getItem('suno_active_backend'),
+    'https://suno-music-x6c4.onrender.com',
     'http://10.51.125.150:3001',
     'http://10.0.2.2:3001',
     'http://localhost:3001'
   ].filter(Boolean);
 
-  let currentBackend = CANDIDATES[0] || 'http://10.51.125.150:3001';
+  let currentBackend = CANDIDATES[0] || 'https://suno-music-x6c4.onrender.com';
 
   // Proactive background ping to lock onto responding host immediately
   (async () => {
-    for (const host of ['http://10.51.125.150:3001', currentBackend, 'http://10.0.2.2:3001']) {
+    for (const host of [currentBackend, 'https://suno-music-x6c4.onrender.com', 'http://10.51.125.150:3001', 'http://10.0.2.2:3001']) {
       try {
         const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), 1200);
+        const t = setTimeout(() => controller.abort(), 2000);
         const r = await originalFetch(`${host}/api/health`, { signal: controller.signal });
         clearTimeout(t);
         if (r.ok) {
@@ -44,6 +45,7 @@ if (isNative) {
     if (typeof resource === 'string' && (resource.startsWith('/api') || resource.startsWith('/uploads'))) {
       const endpointsToTry = [
         currentBackend,
+        'https://suno-music-x6c4.onrender.com',
         'http://10.51.125.150:3001',
         'http://10.0.2.2:3001',
         'http://localhost:3001'

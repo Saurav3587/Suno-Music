@@ -88,6 +88,7 @@ export function MusicProvider({ children }) {
   const recordedTrackIdRef = useRef(null);
   const lastSavedTimeRef = useRef(0);
   const skippedArtistsRef = useRef([]);
+  const playRequestIdRef = useRef(0);
 
   // Persistent refs to always provide latest values to native event listeners & background callbacks
   const queueRef = useRef(queue);
@@ -649,7 +650,7 @@ export function MusicProvider({ children }) {
     if (typeof window !== 'undefined') {
       const isNative = window.location.protocol === 'capacitor:' || (window.location.hostname === 'localhost' && window.location.port !== '5173');
       if (isNative) {
-        base = localStorage.getItem('suno_active_backend') || localStorage.getItem('suno_custom_backend') || 'http://10.51.125.150:3001';
+        base = localStorage.getItem('suno_active_backend') || localStorage.getItem('suno_custom_backend') || 'https://suno-music-x6c4.onrender.com';
       }
     }
     return `${base}/api/audio?url=${encodeURIComponent(streamUrl)}`;
@@ -671,6 +672,7 @@ export function MusicProvider({ children }) {
   // Play a specific song (handles both YouTube, direct CDN audio, and auto-resolving Spotify tracks)
   const playSong = async (song, newQueue = null, options = {}) => {
     if (!song) return;
+    const currentRequestId = ++playRequestIdRef.current;
 
     // Prioritize Studio 320k direct master audio streams over YouTube embeds
     let activeSong = song;
@@ -680,6 +682,7 @@ export function MusicProvider({ children }) {
       !activeSong.youtubeId
     ) {
       activeSong = await resolveTrackStreamUrl(activeSong);
+      if (currentRequestId !== playRequestIdRef.current) return;
     }
 
     // Register into anti-repeat memory window
@@ -792,13 +795,25 @@ export function MusicProvider({ children }) {
         audio.volume = targetVol;
         audio.load();
 
+        if (currentRequestId !== playRequestIdRef.current) return;
+
         const playPromise = audio.play();
         if (playPromise !== undefined) {
           await playPromise;
         }
+        if (currentRequestId !== playRequestIdRef.current) return;
         setIsPlaying(true);
         isPlayingRef.current = true;
       } catch (err) {
+        // A newer song was clicked or playback was deliberately paused — abort cleanly without error or fallback
+        if (
+          err?.name === 'AbortError' ||
+          err?.message?.includes('interrupted by a call to pause') ||
+          currentRequestId !== playRequestIdRef.current
+        ) {
+          return;
+        }
+
         console.warn('Audio playback failed, trying fallback:', err?.message || err);
 
         // Retry with alternate stream URL before resolving a different track or falling back to YouTube.
@@ -813,12 +828,23 @@ export function MusicProvider({ children }) {
             audio.currentTime = 0;
             audio.volume = targetVol;
             audio.load();
+
+            if (currentRequestId !== playRequestIdRef.current) return;
+
             const proxyPlayPromise = audio.play();
             if (proxyPlayPromise !== undefined) await proxyPlayPromise;
+            if (currentRequestId !== playRequestIdRef.current) return;
             setIsPlaying(true);
             isPlayingRef.current = true;
             return;
           } catch (proxyError) {
+            if (
+              proxyError?.name === 'AbortError' ||
+              proxyError?.message?.includes('interrupted by a call to pause') ||
+              currentRequestId !== playRequestIdRef.current
+            ) {
+              return;
+            }
             console.warn('Audio alternate playback failed:', proxyError?.message || proxyError);
           }
         }
@@ -826,9 +852,10 @@ export function MusicProvider({ children }) {
         // The existing stream URL may be expired or invalid.
         // Re-resolve it once instead of repeatedly trying the broken URL.
         if (!options.streamRetry) {
+          if (currentRequestId !== playRequestIdRef.current) return;
           try {
             const youtubeTrack = await resolveYouTubeTrack(activeSong);
-
+            if (currentRequestId !== playRequestIdRef.current) return;
             if (youtubeTrack?.youtubeId) {
               return playSong(
                 youtubeTrack,
@@ -845,6 +872,7 @@ export function MusicProvider({ children }) {
         isPlayingRef.current = false;
       }
     } else if (activeSong.source === 'youtube' || activeSong.youtubeId) {
+      if (currentRequestId !== playRequestIdRef.current) return;
       // 2. Fallback to YouTube Player only when direct stream is unavailable
       audioRef.current.pause();
       if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
@@ -924,6 +952,7 @@ export function MusicProvider({ children }) {
               isPlayingRef.current = true;
             })
             .catch(e => {
+              if (e?.name === 'AbortError' || e?.message?.includes('interrupted by a call to pause')) return;
               console.warn('Play error:', e);
               playSong(activeTrack, queueRef.current);
             });

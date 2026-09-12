@@ -35,6 +35,7 @@ export default function YouTubeEngine({
         height: '100%',
         width: '100%',
         videoId: '',
+        host: 'https://www.youtube-nocookie.com',
         playerVars: {
           autoplay: 1,
           controls: 0,
@@ -44,7 +45,8 @@ export default function YouTubeEngine({
           playsinline: 1,
           rel: 0,
           iv_load_policy: 3,
-          enablejsapi: 1
+          enablejsapi: 1,
+          origin: typeof window !== 'undefined' && window.location.origin ? window.location.origin : undefined
         },
         events: {
           onReady: (e) => {
