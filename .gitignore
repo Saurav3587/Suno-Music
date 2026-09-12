@@ -12,6 +12,7 @@ node_modules
 
 # Environment secrets
 .env
+.env.example
 .env.local
 .env.development.local
 .env.test.local
@@ -21,6 +22,9 @@ node_modules
 dist
 dist-ssr
 *.local
+
+# Database certificates
+certs/
 
 # Editor directories and files
 .vscode/*
