@@ -650,7 +650,7 @@ export function MusicProvider({ children }) {
     if (typeof window !== 'undefined') {
       const isNative = window.location.protocol === 'capacitor:' || (window.location.hostname === 'localhost' && window.location.port !== '5173');
       if (isNative) {
-        base = localStorage.getItem('suno_active_backend') || localStorage.getItem('suno_custom_backend') || 'https://suno-music-x6c4.onrender.com';
+        base = localStorage.getItem('suno_custom_backend') || 'https://suno-music-x6c4.onrender.com';
       }
     }
     return `${base}/api/audio?url=${encodeURIComponent(streamUrl)}`;

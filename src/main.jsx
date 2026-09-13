@@ -12,88 +12,42 @@ const isNative = Capacitor.isNativePlatform() || window.location.protocol === 'c
 if (isNative) {
   const originalFetch = window.fetch;
   const CLOUD_BACKEND = 'https://suno-music-x6c4.onrender.com';
-  const LOCAL_BACKENDS = [
-    'http://10.51.125.150:3001',
-    'http://10.0.2.2:3001',
-    'http://localhost:3001'
-  ];
 
-  // Default to saved custom backend or cloud backend (never stick permanently to a dead local IP)
-  let currentBackend = localStorage.getItem('suno_custom_backend')
-    || localStorage.getItem('suno_active_backend')
-    || CLOUD_BACKEND;
+  // Default to 24/7 cloud backend; only use custom local backend if developer explicitly set it
+  let currentBackend = localStorage.getItem('suno_custom_backend') || CLOUD_BACKEND;
 
-  // Proactive background ping on app launch:
-  // 1. Probe local server with a fast 1200ms timeout
-  // 2. Ping cloud backend concurrently to ensure Render is awake and ready
+  // Proactive background ping on app launch to warm up Render if cold
   (async () => {
-    let foundLocal = false;
-    for (const localHost of LOCAL_BACKENDS) {
-      try {
-        const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), 1200);
-        const r = await originalFetch(`${localHost}/api/health`, { signal: controller.signal });
-        clearTimeout(t);
-        if (r.ok) {
-          currentBackend = localHost;
-          localStorage.setItem('suno_active_backend', localHost);
-          foundLocal = true;
-          break;
-        }
-      } catch (e) {
-        // continue
-      }
-    }
-
-    // If laptop is closed or on a different network, lock immediately onto cloud backend
-    if (!foundLocal && !localStorage.getItem('suno_custom_backend')) {
-      currentBackend = CLOUD_BACKEND;
-      localStorage.setItem('suno_active_backend', CLOUD_BACKEND);
-      // Warm up Render if cold
-      try {
-        const c = new AbortController();
-        const t = setTimeout(() => c.abort(), 10000);
-        await originalFetch(`${CLOUD_BACKEND}/api/health`, { signal: c.signal });
-        clearTimeout(t);
-      } catch (e) {}
-    }
+    try {
+      const c = new AbortController();
+      const t = setTimeout(() => c.abort(), 12000);
+      await originalFetch(`${CLOUD_BACKEND}/api/health`, { signal: c.signal });
+      clearTimeout(t);
+    } catch (_) {}
   })();
 
   window.fetch = async function (resource, init) {
     if (typeof resource === 'string' && (resource.startsWith('/api') || resource.startsWith('/uploads'))) {
       const endpointsToTry = [
         currentBackend,
-        CLOUD_BACKEND,
-        ...LOCAL_BACKENDS
+        CLOUD_BACKEND
       ].filter((h, idx, arr) => arr.indexOf(h) === idx);
 
       let lastError;
       for (const host of endpointsToTry) {
         try {
-          const isLocal = host.includes('10.') || host.includes('localhost') || host.includes('127.0.0.1');
-          // Local hosts fail fast (1500ms) if laptop is closed; Cloud host gets 15s for scraping & searches
-          const timeoutMs = isLocal ? 1500 : 15000;
-
+          const timeoutMs = 20000;
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), timeoutMs);
           const combinedSignal = init?.signal || controller.signal;
           const res = await originalFetch(`${host}${resource}`, { ...init, signal: combinedSignal });
           clearTimeout(timer);
-
-          if (currentBackend !== host) {
-            currentBackend = host;
-            localStorage.setItem('suno_active_backend', host);
-          }
           return res;
         } catch (err) {
           lastError = err;
-          // If the failed host was currentBackend, immediately switch to Cloud so next requests don't lag
-          if (currentBackend === host && host !== CLOUD_BACKEND) {
-            currentBackend = CLOUD_BACKEND;
-          }
         }
       }
-      throw lastError || new Error('Failed to connect to backend server');
+      throw lastError || new Error('Failed to connect to cloud backend server');
     }
     return originalFetch(resource, init);
   };

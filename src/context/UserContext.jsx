@@ -114,8 +114,8 @@ export function UserProvider({ children }) {
               }
             }
           }
-        } else {
-          // Token expired or invalid
+        } else if (res.status === 401 || res.status === 403) {
+          // Token strictly expired or invalid
           setAuthToken(null);
           setCurrentUser(null);
         }
