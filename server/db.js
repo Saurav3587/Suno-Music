@@ -10,16 +10,8 @@ const DB_USER = process.env.DB_USER || 'root';
 const DB_PASSWORD = process.env.DB_PASSWORD || '';
 const DB_NAME = process.env.DB_NAME || 'suno_music';
 const DB_PORT = parseInt(process.env.DB_PORT || '3306', 10);
-const DB_SSL_CA = process.env.DB_SSL_CA;
-
-const caCertificate = DB_SSL_CA?.includes('BEGIN CERTIFICATE')
-  ? DB_SSL_CA
-  : DB_SSL_CA && !DB_SSL_CA.includes('path\\to\\ca.pem') && fs.existsSync(DB_SSL_CA)
-    ? fs.readFileSync(DB_SSL_CA, 'utf8')
-    : undefined;
-
-const mysqlSsl = caCertificate
-  ? { ca: caCertificate, rejectUnauthorized: true }
+const mysqlSsl = (DB_HOST.includes('tidbcloud.com') || DB_PORT === 4000 || process.env.DB_SSL === 'true')
+  ? { minVersion: 'TLSv1.2', rejectUnauthorized: true }
   : undefined;
 
 const mysqlConnectionOptions = {
@@ -34,10 +26,18 @@ const mysqlConnectionOptions = {
 let pool = null;
 let isConnected = false;
 let dbInitPromise = null;
+let lastConnectAttempt = 0;
 
-// Helper to wait briefly if DB initialization is in-flight
+// Helper to wait briefly if DB initialization is in-flight, or attempt reconnection if offline
 export async function ensureDbReady(timeoutMs = 3000) {
   if (isConnected && pool) return true;
+
+  // If disconnected, automatically retry connecting every 30 seconds
+  if (!isConnected && !dbInitPromise && (Date.now() - lastConnectAttempt > 30000)) {
+    lastConnectAttempt = Date.now();
+    initDatabase().catch(() => {});
+  }
+
   if (dbInitPromise) {
     try {
       await Promise.race([
@@ -49,7 +49,15 @@ export async function ensureDbReady(timeoutMs = 3000) {
   return isConnected;
 }
 
-// In-memory fallback if MySQL server is not running locally during development
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DATA_DIR = path.resolve(__dirname, 'data');
+const DB_FILE = path.join(DATA_DIR, 'suno_persistent_fallback.json');
+
+// Resilient fallback storage: stored in memory AND backed by persistent disk file
 const fallbackStore = {
   users: new Map(), // user_id or phone -> user object
   playlists: new Map(), // id -> playlist object
@@ -57,6 +65,106 @@ const fallbackStore = {
   history: new Map(), // user_id -> Array of songs
   tasteProfiles: new Map() // user_id -> profile
 };
+
+// Load saved data from disk on startup
+function loadFallbackStoreFromDisk() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, 'utf8');
+      const data = JSON.parse(raw);
+
+      if (Array.isArray(data.users)) {
+        for (const u of data.users) {
+          if (!u) continue;
+          const uid = u.userId || u.user_id;
+          if (uid) fallbackStore.users.set(String(uid).toLowerCase(), u);
+          if (u.phone) {
+            fallbackStore.users.set(u.phone, u);
+            const cleanDigits = String(u.phone).replace(/\D/g, '');
+            if (cleanDigits.length >= 10) {
+              fallbackStore.users.set(cleanDigits.slice(-10), u);
+            }
+          }
+          if (u.id) fallbackStore.users.set(u.id, u);
+        }
+      }
+
+      if (Array.isArray(data.playlists)) {
+        for (const pl of data.playlists) {
+          if (pl && pl.id) fallbackStore.playlists.set(pl.id, pl);
+        }
+      }
+
+      if (data.likedSongs && typeof data.likedSongs === 'object') {
+        for (const [uid, songs] of Object.entries(data.likedSongs)) {
+          if (Array.isArray(songs)) {
+            fallbackStore.likedSongs.set(uid, new Map(songs.map(s => [s.id, s])));
+          }
+        }
+      }
+
+      if (data.history && typeof data.history === 'object') {
+        for (const [uid, arr] of Object.entries(data.history)) {
+          if (Array.isArray(arr)) fallbackStore.history.set(uid, arr);
+        }
+      }
+
+      if (data.tasteProfiles && typeof data.tasteProfiles === 'object') {
+        for (const [uid, prof] of Object.entries(data.tasteProfiles)) {
+          if (prof) fallbackStore.tasteProfiles.set(uid, prof);
+        }
+      }
+
+      console.log(`💾 [Storage] Loaded ${new Set(fallbackStore.users.values()).size} persistent user account(s) from disk`);
+    }
+  } catch (err) {
+    console.warn('⚠️ [Storage] Could not load persistent data from disk:', err.message);
+  }
+}
+
+// Persist data to disk safely with debounce
+let saveTimeout = null;
+export function saveFallbackStoreToDisk() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      const uniqueUsers = Array.from(new Set(fallbackStore.users.values()));
+      const payload = {
+        users: uniqueUsers,
+        playlists: Array.from(fallbackStore.playlists.values()),
+        likedSongs: Object.fromEntries(
+          Array.from(fallbackStore.likedSongs.entries()).map(([uid, map]) => [uid, Array.from(map.values())])
+        ),
+        history: Object.fromEntries(fallbackStore.history),
+        tasteProfiles: Object.fromEntries(fallbackStore.tasteProfiles),
+        lastSaved: new Date().toISOString()
+      };
+      fs.writeFileSync(DB_FILE, JSON.stringify(payload, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('⚠️ [Storage] Could not save persistent data to disk:', err.message);
+    }
+  }, 150);
+}
+
+// Initialize disk storage immediately
+loadFallbackStoreFromDisk();
+
+export function getDatabaseStatus() {
+  const uniqueUsers = new Set(fallbackStore.users.values()).size;
+  return {
+    isConnected,
+    database: DB_NAME,
+    host: DB_HOST,
+    mode: isConnected ? 'mysql' : 'persistent_disk_fallback',
+    userCount: uniqueUsers
+  };
+}
 
 /**
  * Initializes MySQL connection pool and creates all required tables & indexes
@@ -97,8 +205,9 @@ export async function initDatabase() {
       return true;
     } catch (err) {
       console.warn(`⚠️ [MySQL] Could not connect to MySQL server (${err.message}).`);
-      console.warn(`💡 [MySQL] Running with fast In-Memory storage. Start MySQL/XAMPP on port ${DB_PORT} to persist data to disk.`);
+      console.warn(`💡 [MySQL] Running with persistent disk storage. Start MySQL/XAMPP on port ${DB_PORT} to persist data to disk.`);
       isConnected = false;
+      dbInitPromise = null;
       return false;
     }
   })();
@@ -234,7 +343,11 @@ export async function createUser({ name, userId, phone, passwordHash, avatar = '
   const user = { id, userId: cleanUserId, name: name.trim(), phone: cleanPhone, password_hash: passwordHash, avatar, created_at: new Date() };
   fallbackStore.users.set(cleanUserId, user);
   fallbackStore.users.set(cleanPhone, user);
+  if (cleanPhone.length >= 10) {
+    fallbackStore.users.set(cleanPhone.slice(-10), user);
+  }
   fallbackStore.users.set(id, user);
+  saveFallbackStoreToDisk();
   return { id, userId: cleanUserId, name: name.trim(), phone: cleanPhone, avatar };
 }
 
@@ -246,18 +359,28 @@ export async function getUserByLogin(login) {
   await ensureDbReady();
   const clean = login.trim().toLowerCase().replace(/^@/, '');
   const cleanDigits = login.trim().replace(/[^0-9+]/g, '');
+  const digitsOnly = login.trim().replace(/\D/g, '');
+  const last10 = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : '';
 
   if (isConnected && pool) {
     const [rows] = await pool.query(
-      `SELECT * FROM users WHERE user_id = ? OR phone = ? OR phone = ? LIMIT 1`,
-      [clean, clean, cleanDigits]
+      `SELECT * FROM users 
+       WHERE user_id = ? 
+          OR phone = ? 
+          OR phone = ? 
+          OR (LENGTH(?) = 10 AND phone = ?)
+       LIMIT 1`,
+      [clean, clean, cleanDigits, last10, last10]
     );
     if (rows.length > 0) return rows[0];
     return null;
   }
 
   // Fallback
-  return fallbackStore.users.get(clean) || fallbackStore.users.get(cleanDigits) || null;
+  return fallbackStore.users.get(clean) 
+    || fallbackStore.users.get(cleanDigits) 
+    || (last10 ? fallbackStore.users.get(last10) : null) 
+    || null;
 }
 
 /**
@@ -323,13 +446,14 @@ export async function updateUserProfileDb(userId, { name, bio, avatar }) {
     return await getUserById(userId);
   }
 
-  // Fallback in-memory
+  // Fallback in-memory & disk
   const u = fallbackStore.users.get(userId);
   if (u) {
     if (name !== undefined) u.name = name.trim();
     if (bio !== undefined) u.bio = bio.trim();
     if (avatar !== undefined) u.avatar = avatar;
     fallbackStore.users.set(userId, u);
+    saveFallbackStoreToDisk();
   }
   return await getUserById(userId);
 }
@@ -445,6 +569,7 @@ export async function syncUserLibrary(userId, { playlists = [], likedSongs = [],
   });
 
   fallbackStore.history.set(userId, recentSongs.slice(0, 50));
+  saveFallbackStoreToDisk();
 }
 
 /**
@@ -474,13 +599,16 @@ export async function toggleLikedSongDb(userId, song) {
   // Fallback
   if (!fallbackStore.likedSongs.has(userId)) fallbackStore.likedSongs.set(userId, new Map());
   const userLikes = fallbackStore.likedSongs.get(userId);
+  let res = false;
   if (userLikes.has(song.id)) {
     userLikes.delete(song.id);
-    return false;
+    res = false;
   } else {
     userLikes.set(song.id, song);
-    return true;
+    res = true;
   }
+  saveFallbackStoreToDisk();
+  return res;
 }
 
 /**
@@ -499,6 +627,7 @@ export async function createPlaylistDb(userId, { name, description = '', cover =
 
   const pl = { id: plId, user_id: userId, name: name.trim(), description: description.trim(), cover, songs: [], createdAt: new Date().toLocaleDateString() };
   fallbackStore.playlists.set(plId, pl);
+  saveFallbackStoreToDisk();
   return pl;
 }
 
@@ -512,6 +641,7 @@ export async function deletePlaylistDb(userId, playlistId) {
     return true;
   }
   fallbackStore.playlists.delete(playlistId);
+  saveFallbackStoreToDisk();
   return true;
 }
 
@@ -533,6 +663,7 @@ export async function addSongToPlaylistDb(playlistId, song) {
   if (pl) {
     if (!pl.songs.some(s => s.id === song.id)) {
       pl.songs = [song, ...pl.songs];
+      saveFallbackStoreToDisk();
     }
   }
 }
@@ -587,8 +718,10 @@ export async function recordListenEventDb(userId, { song, completed = false, ski
   const prof = fallbackStore.tasteProfiles.get(userId);
   if (completed && primaryArtist) {
     prof.liked_artists[primaryArtist] = (prof.liked_artists[primaryArtist] || 0) + 1;
+    saveFallbackStoreToDisk();
   } else if (skippedEarly && primaryArtist) {
     prof.skipped_artists[primaryArtist] = (prof.skipped_artists[primaryArtist] || 0) + 1;
+    saveFallbackStoreToDisk();
   }
 }
 

@@ -366,10 +366,11 @@ export default function AuthScreen() {
         </div>
 
         {/* Feedback Alerts */}
+        {/* Feedback Alerts */}
         {error && (
           <div style={{
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             gap: '10px',
             background: 'rgba(255, 59, 104, 0.15)',
             border: '1px solid rgba(255, 59, 104, 0.4)',
@@ -380,8 +381,41 @@ export default function AuthScreen() {
             marginBottom: '18px',
             animation: 'authCascadeIn 0.3s ease'
           }}>
-            <AlertCircle size={18} style={{ flexShrink: 0 }} />
-            <span>{error}</span>
+            <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <span>{error}</span>
+              {error.toLowerCase().includes('no account found') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const digits = loginIdentifier.replace(/\D/g, '');
+                    if (digits.length >= 10) {
+                      setPhone(digits.slice(-10));
+                    }
+                    setError('');
+                    switchTab('signup');
+                  }}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.12)',
+                    border: '1px solid rgba(255, 255, 255, 0.25)',
+                    color: '#ffffff',
+                    borderRadius: '8px',
+                    padding: '6px 10px',
+                    cursor: 'pointer',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    textAlign: 'left',
+                    width: 'fit-content',
+                    marginTop: '2px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px'
+                  }}
+                >
+                  <span>✨ Create free account with this number →</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
 

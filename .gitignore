@@ -23,8 +23,8 @@ dist
 dist-ssr
 *.local
 
-# Database certificates
-certs/
+# Local database backups
+server/data/
 
 # Editor directories and files
 .vscode/*

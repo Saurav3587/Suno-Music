@@ -13,7 +13,7 @@ import { searchSongs, getTrendingSongs, getRomanticHits, getRotatedAcousticHits,
 import { normalizeSong } from './decrypt.js';
 import { getSpotifyCharts, parseSpotifyUrl, getSpotifyEntity, resolveTrackToPlayable, getOfficialPlaylistsList, getSpotifyPlaylistByKeyOrId } from './spotifyService.js';
 import { deduplicateTrackList } from './dedupService.js';
-import { initDatabase, createUser, getUserByLogin, updateUserProfileDb, getUserLibrary, syncUserLibrary, toggleLikedSongDb, createPlaylistDb, deletePlaylistDb, addSongToPlaylistDb, recordListenEventDb, getMostListenedSongs24h } from './db.js';
+import { initDatabase, createUser, getUserByLogin, updateUserProfileDb, getUserLibrary, syncUserLibrary, toggleLikedSongDb, createPlaylistDb, deletePlaylistDb, addSongToPlaylistDb, recordListenEventDb, getMostListenedSongs24h, getDatabaseStatus } from './db.js';
 import { hashPassword, comparePassword, generateToken, requireAuth, optionalAuth } from './auth.js';
 import { analyzeListeningSession, getAIRecommendationReasoning, interpretMoodRequest, isAIAvailable } from './llmService.js';
 import { generateSimilarMoodQueue } from './moodRadioService.js';
@@ -46,9 +46,13 @@ function setCache(key, data) {
 
 // Health & Database check
 app.get('/api/health', (req, res) => {
+  const dbStatus = getDatabaseStatus();
   res.json({ 
     status: 'ok', 
-    database: 'MySQL Connected (suno_music)', 
+    database: dbStatus.isConnected ? `MySQL Connected (${dbStatus.database})` : 'Persistent Disk Storage (MySQL Disconnected)', 
+    mode: dbStatus.mode,
+    isMySQLConnected: dbStatus.isConnected,
+    userCount: dbStatus.userCount,
     tables: ['users', 'playlists', 'playlist_songs', 'liked_songs', 'listen_history', 'user_taste_profiles'],
     service: 'Suno Music Server', 
     time: new Date().toISOString() 
