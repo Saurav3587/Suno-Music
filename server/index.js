@@ -5,11 +5,14 @@ try {
 
 import express from 'express';
 import cors from 'cors';
+import https from 'node:https';
+import http from 'node:http';
 import yts from 'yt-search';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { searchSongs, getTrendingSongs, getRomanticHits, getRotatedAcousticHits, generateAutoPlaylist } from './autoPlaylistService.js';
+import { searchYouTubeMusic, getYouTubeAudioStream } from './youtubeMusicService.js';
 import { normalizeSong } from './decrypt.js';
 import { getSpotifyCharts, parseSpotifyUrl, getSpotifyEntity, resolveTrackToPlayable, getOfficialPlaylistsList, getSpotifyPlaylistByKeyOrId } from './spotifyService.js';
 import { deduplicateTrackList } from './dedupService.js';
@@ -301,6 +304,73 @@ app.get('/api/audio', async (req, res) => {
     if (err.name === 'AbortError' || req.destroyed) return;
     console.error('Audio proxy error:', err.message);
     if (!res.headersSent) res.status(502).json({ error: 'Audio source unavailable' });
+  }
+});
+
+// High performance audio proxy for YouTube Music tracks (Native streaming with Range / Partial Content support)
+app.get('/api/yt/audio', async (req, res) => {
+  const videoId = req.query.id;
+  if (!videoId || typeof videoId !== 'string') {
+    return res.status(400).json({ error: 'Missing video ID' });
+  }
+
+  try {
+    const streamUrl = await getYouTubeAudioStream(videoId);
+    const parsedUrl = new URL(streamUrl);
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'origin': 'https://www.youtube.com',
+      'referer': 'https://www.youtube.com',
+      'accept': '*/*',
+      'DNT': '?1'
+    };
+    if (req.headers.range) {
+      headers['Range'] = req.headers.range;
+    }
+
+    const client = parsedUrl.protocol === 'http:' ? http : https;
+    const proxyReq = client.get(parsedUrl, { headers }, (upstreamRes) => {
+      res.status(upstreamRes.statusCode || 200);
+      for (const [k, v] of Object.entries(upstreamRes.headers)) {
+        if (['content-type', 'content-length', 'content-range', 'accept-ranges', 'etag'].includes(k.toLowerCase())) {
+          res.setHeader(k, v);
+        }
+      }
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      upstreamRes.pipe(res);
+    });
+
+    proxyReq.on('error', (err) => {
+      console.error('YouTube audio proxy error:', err.message);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Audio stream unavailable', message: err.message });
+      }
+    });
+
+    req.on('close', () => {
+      if (!res.writableEnded) {
+        proxyReq.destroy();
+      }
+    });
+  } catch (err) {
+    console.error('YouTube audio proxy resolution error:', err.message);
+    if (!res.headersSent) {
+      res.status(502).json({ error: 'Could not resolve audio stream', message: err.message });
+    }
+  }
+});
+
+// Search YouTube Music directly for official studio tracks
+app.get('/api/yt/search', async (req, res) => {
+  const query = req.query.q;
+  if (!query) return res.json({ results: [] });
+
+  try {
+    const results = await searchYouTubeMusic(query, 25);
+    res.json({ results });
+  } catch (err) {
+    console.error('YouTube Music search API error:', err);
+    res.status(500).json({ error: 'Failed to search YouTube Music', message: err.message });
   }
 });
 

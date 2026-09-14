@@ -340,34 +340,36 @@ export function MusicProvider({ children }) {
     audio.preload = 'auto';
 
     const onTimeUpdate = () => {
-  if (currentTrackRef.current?.source !== 'youtube') {
-    const cTime = audio.currentTime;
+      const isIframeYt = currentTrackRef.current?.source === 'youtube' && !currentTrackRef.current?.streamUrl;
+      if (!isIframeYt) {
+        const cTime = audio.currentTime;
 
-    setCurrentTime(cTime);
-    currentTimeRef.current = cTime;
+        setCurrentTime(cTime);
+        currentTimeRef.current = cTime;
 
-    if (audio.duration && !isNaN(audio.duration)) {
-      setDuration(audio.duration);
-      durationRef.current = audio.duration;
+        if (audio.duration && !isNaN(audio.duration)) {
+          setDuration(audio.duration);
+          durationRef.current = audio.duration;
 
-      syncNativeNotification({
-        duration: audio.duration
-      });
+          syncNativeNotification({
+            duration: audio.duration
+          });
 
-      if (
-        audio.duration > 5 &&
-        cTime >= audio.duration - 0.35 &&
-        !audio.paused &&
-        !audio.ended
-      ) {
-        handleSongEndedRef.current?.();
+          if (
+            audio.duration > 5 &&
+            cTime >= audio.duration - 0.35 &&
+            !audio.paused &&
+            !audio.ended
+          ) {
+            handleSongEndedRef.current?.();
+          }
+        }
       }
-    }
-  }
-};
+    };
 
     const onLoadedMetadata = () => {
-      if (currentTrackRef.current?.source !== 'youtube') {
+      const isIframeYt = currentTrackRef.current?.source === 'youtube' && !currentTrackRef.current?.streamUrl;
+      if (!isIframeYt) {
         if (audio.duration && !isNaN(audio.duration)) {
           setDuration(audio.duration);
           durationRef.current = audio.duration;
@@ -376,21 +378,24 @@ export function MusicProvider({ children }) {
     };
 
     const onPlay = () => {
-      if (currentTrackRef.current?.source !== 'youtube') {
+      const isIframeYt = currentTrackRef.current?.source === 'youtube' && !currentTrackRef.current?.streamUrl;
+      if (!isIframeYt) {
         setIsPlaying(true);
         isPlayingRef.current = true;
       }
     };
 
     const onPause = () => {
-      if (currentTrackRef.current?.source !== 'youtube') {
+      const isIframeYt = currentTrackRef.current?.source === 'youtube' && !currentTrackRef.current?.streamUrl;
+      if (!isIframeYt) {
         setIsPlaying(false);
         isPlayingRef.current = false;
       }
     };
 
     const onEnded = () => {
-      if (currentTrackRef.current?.source !== 'youtube') {
+      const isIframeYt = currentTrackRef.current?.source === 'youtube' && !currentTrackRef.current?.streamUrl;
+      if (!isIframeYt) {
         handleSongEndedRef.current?.();
       }
     };
@@ -426,7 +431,7 @@ export function MusicProvider({ children }) {
 
     try {
       navigator.mediaSession.setActionHandler('play', () => {
-        if (currentTrackRef.current?.source === 'youtube') {
+        if (currentTrackRef.current?.source === 'youtube' && !currentTrackRef.current?.streamUrl) {
           ytPlayerRef.current?.playVideo();
         } else {
           audioRef.current.play().catch(() => { });
@@ -435,7 +440,7 @@ export function MusicProvider({ children }) {
         isPlayingRef.current = true;
       });
       navigator.mediaSession.setActionHandler('pause', () => {
-        if (currentTrackRef.current?.source === 'youtube') {
+        if (currentTrackRef.current?.source === 'youtube' && !currentTrackRef.current?.streamUrl) {
           ytPlayerRef.current?.pauseVideo();
         } else {
           audioRef.current.pause();
@@ -589,7 +594,7 @@ export function MusicProvider({ children }) {
       const track = currentTrackRef.current;
       if (!track) return;
 
-      if (track.source === 'youtube' || track.youtubeId) {
+      if (track.source === 'youtube' && !track.streamUrl) {
         // YouTube: check player state — 0 = ENDED
         try {
           const ytState = ytPlayerRef.current?.getPlayerState?.();
@@ -645,7 +650,8 @@ export function MusicProvider({ children }) {
     return track;
   };
 
-  const getProxiedAudioUrl = (streamUrl) => {
+  const getResolvedAudioUrl = (streamUrl) => {
+    if (!streamUrl) return '';
     let base = '';
     if (typeof window !== 'undefined') {
       const isNative = window.location.protocol === 'capacitor:' || (window.location.hostname === 'localhost' && window.location.port !== '5173');
@@ -653,7 +659,14 @@ export function MusicProvider({ children }) {
         base = localStorage.getItem('suno_custom_backend') || 'https://suno-music-x6c4.onrender.com';
       }
     }
-    return `${base}/api/audio?url=${encodeURIComponent(streamUrl)}`;
+    const isSaavnCdnUrl = /^https:\/\/[^/]+\.saavncdn\.com\//i.test(streamUrl);
+    if (isSaavnCdnUrl) {
+      return `${base}/api/audio?url=${encodeURIComponent(streamUrl)}`;
+    }
+    if (streamUrl.startsWith('/')) {
+      return `${base}${streamUrl}`;
+    }
+    return streamUrl;
   };
 
   const resolveYouTubeTrack = async (track) => {
@@ -786,8 +799,7 @@ export function MusicProvider({ children }) {
         // Use the same-origin proxy first. Some browsers reject Saavn's
         // audio/mp4 CDN response even though the URL is otherwise valid.
         const directUrl = activeSong.streamUrl;
-        const isSaavnCdnUrl = /^https:\/\/[^/]+\.saavncdn\.com\//i.test(directUrl);
-        const playbackUrl = isSaavnCdnUrl ? getProxiedAudioUrl(directUrl) : directUrl;
+        const playbackUrl = getResolvedAudioUrl(directUrl);
 
         audio.pause();
         audio.src = playbackUrl;
@@ -919,7 +931,7 @@ export function MusicProvider({ children }) {
     const activeTrack = currentTrackRef.current;
     if (!activeTrack) return;
 
-    if (activeTrack.source === 'youtube' || activeTrack.youtubeId) {
+    if (activeTrack.source === 'youtube' && !activeTrack.streamUrl) {
       if (isPlayingRef.current) {
         ytPlayerRef.current?.pauseVideo();
         setIsPlaying(false);
@@ -964,7 +976,7 @@ export function MusicProvider({ children }) {
   const seekTo = (seconds) => {
     setCurrentTime(seconds);
     currentTimeRef.current = seconds;
-    if (currentTrackRef.current?.source === 'youtube') {
+    if (currentTrackRef.current?.source === 'youtube' && !currentTrackRef.current?.streamUrl) {
       ytPlayerRef.current?.seekTo(seconds, true);
     } else {
       audioRef.current.currentTime = seconds;
@@ -991,7 +1003,7 @@ export function MusicProvider({ children }) {
 
     if (currentRepeat === 'one') {
       seekTo(0);
-      if (currentT?.source === 'youtube') {
+      if (currentT?.source === 'youtube' && !currentT?.streamUrl) {
         ytPlayerRef.current?.playVideo();
       } else {
         audioRef.current.currentTime = 0;
@@ -1101,7 +1113,7 @@ export function MusicProvider({ children }) {
 
     if (currentRepeat === 'one') {
       seekTo(0);
-      if (activeTrack?.source === 'youtube') {
+      if (activeTrack?.source === 'youtube' && !activeTrack?.streamUrl) {
         ytPlayerRef.current?.playVideo();
       } else {
         audioRef.current.currentTime = 0;

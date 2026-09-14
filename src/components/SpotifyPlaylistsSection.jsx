@@ -1,14 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Disc3 } from 'lucide-react';
+import { Play, Disc3, Sparkles } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
-
-function SpotifyIcon({ size = 18, color = '#1db954' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
-      <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.516 17.307c-.218.358-.686.471-1.044.253-2.864-1.75-6.47-2.146-10.718-1.176-.411.094-.823-.16-.917-.571-.094-.411.16-.823.571-.917 4.654-1.063 8.647-.611 11.855 1.348.358.218.471.686.253 1.063zm1.472-3.276c-.275.447-.86.589-1.307.314-3.28-2.016-8.28-2.599-12.16-1.421-.502.152-1.037-.133-1.189-.635-.152-.502.133-1.037.635-1.189 4.433-1.344 9.94-.7-13.626 1.564.447.275.589.86.314 1.307zm.126-3.41c-3.933-2.336-10.426-2.55-14.204-1.403-.604.183-1.246-.162-1.429-.766-.183-.604.162-1.246.766-1.429 4.343-1.318 11.516-1.069 16.037 1.614.542.322.721 1.026.399 1.568-.322.542-1.026.721-1.568.399z" />
-    </svg>
-  );
-}
 
 const CATEGORY_CHIPS = [
   { id: 'all',     label: 'All' },
@@ -36,7 +28,7 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
           setPlaylists(data.playlists);
         }
       } catch (err) {
-        console.error('Failed to load Spotify playlists:', err);
+        console.error('Failed to load playlists:', err);
       } finally {
         setLoading(false);
       }
@@ -59,7 +51,7 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
         playSong(data.songs[0], data.songs);
       }
     } catch (err) {
-      console.error('Failed to quick play Spotify playlist:', err);
+      console.error('Failed to quick play playlist:', err);
     } finally {
       setPlayingPlaylistKey(null);
     }
@@ -70,11 +62,11 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
       {/* Section Header */}
       <div className="section-header" style={{ marginTop: '14px', marginBottom: '8px' }}>
         <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <SpotifyIcon size={20} />
-          <span>Official Spotify Playlists</span>
+          <Sparkles size={19} color="#ff3b68" />
+          <span>Featured Curated Mixes</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span className="section-subtitle" style={{ color: '#1db954', fontWeight: 700 }}>
+          <span className="section-subtitle" style={{ color: '#ff758c', fontWeight: 700 }}>
             {playlists.length || 24} Playlists
           </span>
         </div>
@@ -98,9 +90,9 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
               whiteSpace: 'nowrap',
               padding: '6px 14px',
               borderRadius: '100px',
-              border: activeCategory === chip.id ? '1px solid rgba(29, 185, 84, 0.6)' : '1px solid rgba(255, 255, 255, 0.08)',
-              background: activeCategory === chip.id ? 'rgba(29, 185, 84, 0.2)' : 'rgba(255, 255, 255, 0.04)',
-              color: activeCategory === chip.id ? '#1db954' : 'rgba(255, 255, 255, 0.7)',
+              border: activeCategory === chip.id ? '1px solid rgba(255, 59, 104, 0.6)' : '1px solid rgba(255, 255, 255, 0.08)',
+              background: activeCategory === chip.id ? 'rgba(255, 59, 104, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+              color: activeCategory === chip.id ? '#ff758c' : 'rgba(255, 255, 255, 0.7)',
               fontSize: '0.78rem',
               fontWeight: activeCategory === chip.id ? 700 : 500,
               cursor: 'pointer',
@@ -128,76 +120,75 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
                 borderRadius: '18px',
                 background: 'rgba(255, 255, 255, 0.04)',
                 padding: '10px',
-                opacity: 0.5,
-                boxSizing: 'border-box'
+                display: 'flex',
+                flexDirection: 'column',
+                opacity: 0.5
               }}
             >
-              <div style={{ width: '100%', aspectRatio: '1/1', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.08)', marginBottom: '8px' }} />
-              <div style={{ height: '12px', width: '80%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', marginBottom: '4px' }} />
-              <div style={{ height: '10px', width: '50%', background: 'rgba(255, 255, 255, 0.04)', borderRadius: '4px' }} />
+              <div style={{ width: '100%', height: '128px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.07)', marginBottom: '8px' }} />
+              <div style={{ width: '75%', height: '14px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.07)', marginBottom: '4px' }} />
+              <div style={{ width: '50%', height: '11px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.04)' }} />
             </div>
           ))
         ) : (
           filteredPlaylists.map(pl => (
             <div
-              key={pl.key || pl.id}
-              onClick={() => onSelectPlaylist && onSelectPlaylist(pl)}
+              key={pl.key}
+              onClick={() => onSelectPlaylist(pl)}
               style={{
                 width: '148px',
                 minWidth: '148px',
                 maxWidth: '148px',
-                height: '208px',
-                minHeight: '208px',
-                maxHeight: '208px',
+                height: '216px',
                 flex: '0 0 148px',
-                boxSizing: 'border-box',
-                scrollSnapAlign: 'start',
-                cursor: 'pointer',
-                borderRadius: '22px',
-                background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.02) 100%)',
-                backdropFilter: 'blur(20px) saturate(190%)',
-                WebkitBackdropFilter: 'blur(20px) saturate(190%)',
-                border: '1px solid rgba(255, 255, 255, 0.14)',
-                boxShadow: 'inset 0 1.5px 1.5px 0 rgba(255, 255, 255, 0.28), inset 0 -1px 1px 0 rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.45)',
-                padding: '10px',
-                position: 'relative',
+                borderRadius: '18px',
+                background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                padding: '9px',
                 display: 'flex',
                 flexDirection: 'column',
-                justifyContent: 'flex-start',
-                overflow: 'hidden',
-                transition: 'transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease, border-color 0.22s ease'
+                cursor: 'pointer',
+                transition: 'transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease',
+                position: 'relative',
+                userSelect: 'none'
               }}
               onMouseEnter={e => {
-                e.currentTarget.style.transform = 'translateY(-3px) scale(1.02)';
-                e.currentTarget.style.borderColor = 'rgba(29, 185, 84, 0.45)';
-                e.currentTarget.style.boxShadow = 'inset 0 1.5px 1.5px rgba(255, 255, 255, 0.4), 0 16px 36px rgba(0, 0, 0, 0.65), 0 0 24px rgba(29, 185, 84, 0.25)';
+                e.currentTarget.style.transform = 'translateY(-4px)';
+                e.currentTarget.style.boxShadow = '0 12px 28px rgba(0, 0, 0, 0.45)';
+                e.currentTarget.style.borderColor = 'rgba(255, 59, 104, 0.35)';
               }}
               onMouseLeave={e => {
-                e.currentTarget.style.transform = 'translateY(0) scale(1)';
-                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.14)';
-                e.currentTarget.style.boxShadow = 'inset 0 1.5px 1.5px 0 rgba(255, 255, 255, 0.28), inset 0 -1px 1px 0 rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.45)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
               }}
             >
-              {/* Cover Image Wrap */}
+              {/* Cover Image with 1-Click Play Overlay */}
               <div style={{
                 position: 'relative',
                 width: '100%',
-                aspectRatio: '1/1',
-                borderRadius: '15px',
+                height: '130px',
+                borderRadius: '12px',
                 overflow: 'hidden',
-                border: '1px solid rgba(255, 255, 255, 0.16)',
-                boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.25), 0 6px 16px rgba(0, 0, 0, 0.5)',
-                background: '#151120',
-                marginBottom: '8px'
+                marginBottom: '8px',
+                boxShadow: '0 4px 14px rgba(0, 0, 0, 0.3)'
               }}>
                 <img
                   src={pl.cover}
                   alt={pl.title}
                   loading="lazy"
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    display: 'block'
+                  }}
+                  onError={e => {
+                    e.currentTarget.src = 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=500&auto=format&fit=crop&q=80';
+                  }}
                 />
 
-                {/* Spotify Logo Pill Top Left */}
+                {/* Curated Badge Pill Top Left */}
                 <div style={{
                   position: 'absolute',
                   top: '6px',
@@ -211,9 +202,9 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
                   alignItems: 'center',
                   gap: '4px'
                 }}>
-                  <SpotifyIcon size={12} />
-                  <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#1db954' }}>
-                    {pl.badge || 'Official'}
+                  <Sparkles size={10} color="#ff758c" />
+                  <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#ff758c' }}>
+                    {pl.badge || 'Curated'}
                   </span>
                 </div>
 
@@ -228,7 +219,7 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
                     width: '36px',
                     height: '36px',
                     borderRadius: '50%',
-                    background: '#1db954',
+                    background: 'linear-gradient(135deg, #ff3b68, #a238ff)',
                     color: '#ffffff',
                     border: 'none',
                     display: 'flex',
@@ -236,10 +227,10 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
                     justifyContent: 'center',
                     boxShadow: '0 4px 14px rgba(0, 0, 0, 0.6)',
                     cursor: 'pointer',
-                    transition: 'transform 0.15s ease, background 0.15s ease'
+                    transition: 'transform 0.15s ease, filter 0.15s ease'
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.12)'; e.currentTarget.style.background = '#1ed760'; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = '#1db954'; }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.12)'; e.currentTarget.style.filter = 'brightness(1.15)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.filter = 'none'; }}
                 >
                   {playingPlaylistKey === pl.key ? (
                     <Disc3 size={18} className="spin-slow" />

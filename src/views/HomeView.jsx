@@ -6,14 +6,7 @@ import SpotifyPlaylistsSection from '../components/SpotifyPlaylistsSection';
 import { useUser } from '../context/UserContext';
 import { useMusic } from '../context/MusicContext';
 
-const SpotifyIcon = ({ size = 16, color = '#1db954' }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-    <circle cx="12" cy="12" r="10" fill={color} />
-    <path d="M7 9.5c3.2-1 7.2-.8 10.3 1" stroke="#000000" strokeWidth="1.8" strokeLinecap="round" />
-    <path d="M7.8 12.3c2.7-.8 6.1-.6 8.7.9" stroke="#000000" strokeWidth="1.6" strokeLinecap="round" />
-    <path d="M8.5 15.1c2.1-.6 4.8-.4 6.9.7" stroke="#000000" strokeWidth="1.4" strokeLinecap="round" />
-  </svg>
-);
+
 
 export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPlaylist, onSearchArtist, onNavigateTab, onOpenImport }) {
   const { userName, userAvatar, currentUser, playlists = [] } = useUser();
@@ -75,9 +68,8 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
         artist: t.artist,
         duration: t.duration,
         image: t.image || spotifyData.cover || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=500&auto=format&fit=crop&q=80',
-        badge: t.badge || (t.rank ? `#${t.rank} Today` : 'Spotify 320k'),
-        rank: t.rank || idx + 1,
-        isSpotify: true
+        badge: t.badge || (t.rank ? `#${t.rank} Today` : 'Top Hit'),
+        rank: t.rank || idx + 1
       }));
       setSpotifySongs(spTracks);
     } catch (err) {
@@ -525,10 +517,10 @@ export default function HomeView({ onOpenSettings, onOpenAddToPlaylist, onOpenPl
       {/* Official Spotify Playlists Showcase (24 Verified Flagship Playlists) */}
       <SpotifyPlaylistsSection onSelectPlaylist={playlist => handlePlaylistClick(playlist)} />
 
-      {/* Spotify Today's Top Hits Tracks */}
+      {/* Today's Top Hits Tracks */}
       <div className="section-header" style={{ marginTop: '8px' }}>
         <div className="section-title">
-          <SpotifyIcon size={18} />
+          <Flame size={18} color="#ff3b68" />
           <span>Today's Top Hits</span>
         </div>
       </div>

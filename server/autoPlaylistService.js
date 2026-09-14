@@ -40,57 +40,86 @@ export function isCleanTrack(song) {
   return !EXCLUDE_REMIX_REGEX.test(song.title);
 }
 
+import { searchYouTubeMusic } from './youtubeMusicService.js';
+
 /**
  * Searches songs by query string.
- * Uses JioSaavn first for 320kbps audio, seamlessly falls back to YouTube if unavailable.
+ * Combines JioSaavn 320kbps Studio Masters with YouTube Music's universal catalog.
+ * Strictly prioritizes original artists/channels and filters out slowed, reverb, and fan edits.
  */
-export async function searchSongs(query, limit = 20) {
+export async function searchSongs(query, limit = 25) {
   if (!query || !query.trim()) return [];
   const cleanQ = query.trim();
 
-  // 1. Try JioSaavn 320kbps
-  try {
-    const data = await fetchJioSaavn({
+  // Run YouTube search and JioSaavn in parallel
+  const [ytRes, saavnRes] = await Promise.allSettled([
+    searchYouTubeMusic(cleanQ, limit),
+    fetchJioSaavn({
       __call: 'search.getResults',
       q: cleanQ,
       n: limit.toString(),
       p: '1'
-    });
-    const rawList = data.results || [];
-    const normalized = rawList
-      .map(normalizeSong)
-      .filter(s => s && s.streamUrl && isCleanTrack(s));
-    if (normalized.length > 0) {
-      return deduplicateTrackList(normalized, { maxCount: limit });
+    })
+  ]);
+
+  // Build a lookup map of JioSaavn 320k direct master streams for zero-server-bandwidth playback
+  const saavnStreamMap = new Map();
+  const saavnList = [];
+  if (saavnRes.status === 'fulfilled' && saavnRes.value?.results) {
+    for (const raw of saavnRes.value.results) {
+      const s = normalizeSong(raw);
+      if (s && s.streamUrl && isCleanTrack(s)) {
+        const key = `${(s.title || '').toLowerCase().trim()}_${(s.artist || '').toLowerCase().trim().split(/[,&]/)[0]}`;
+        if (!saavnStreamMap.has(key)) {
+          saavnStreamMap.set(key, s);
+          saavnList.push({
+            ...s,
+            badge: 'Studio Master',
+            isOriginal: true
+          });
+        }
+      }
     }
-  } catch (err) {
-    // JioSaavn timed out, rate-limited, or blocked from cloud IP — fall back to YouTube
   }
 
-  // 2. Seamless YouTube Search Fallback
-  try {
-    const searchRes = await yts(cleanQ);
-    const cleanVideos = (searchRes?.videos || [])
-      .filter(v => v && v.title && isCleanTrack(v))
-      .slice(0, limit)
-      .map(v => ({
-        id: `yt_${v.videoId}`,
-        youtubeId: v.videoId,
-        source: 'youtube',
-        isAcoustic: /(acoustic|unplugged)/i.test(v.title),
-        title: (v.title || '').replace(/&quot;/g, '"').replace(/&#039;/g, "'"),
-        artist: v.author?.name || 'Artist',
-        album: 'YouTube Music',
-        duration: v.seconds || 0,
-        image: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-        streamUrl: null
-      }));
+  const combined = [];
+  const seenKeys = new Set();
 
-    return deduplicateTrackList(cleanVideos, { maxCount: limit });
-  } catch (ytErr) {
-    console.error('YouTube search fallback error:', ytErr.message);
-    return [];
+  // 1. YouTube Primary Results (YouTube's exact search algorithm & ranking)
+  if (ytRes.status === 'fulfilled' && Array.isArray(ytRes.value)) {
+    for (const ytSong of ytRes.value) {
+      const key = `${(ytSong.title || '').toLowerCase().trim()}_${(ytSong.artist || '').toLowerCase().trim().split(/[,&]/)[0]}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+
+      // If JioSaavn has the direct 320k CDN master stream, use it to save server bandwidth & provide 320k audio
+      const directSaavn = saavnStreamMap.get(key);
+      if (directSaavn && directSaavn.streamUrl) {
+        combined.push({
+          ...ytSong,
+          streamUrl: directSaavn.streamUrl,
+          duration: directSaavn.duration || ytSong.duration,
+          badge: 'Studio Master'
+        });
+      } else {
+        combined.push({
+          ...ytSong,
+          badge: 'Official Audio'
+        });
+      }
+    }
   }
+
+  // 2. Append any additional clean studio tracks found by JioSaavn
+  for (const s of saavnList) {
+    const key = `${(s.title || '').toLowerCase().trim()}_${(s.artist || '').toLowerCase().trim().split(/[,&]/)[0]}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      combined.push(s);
+    }
+  }
+
+  return deduplicateTrackList(combined, { maxCount: limit });
 }
 
 // Seeded PRNG shuffle helper for consistent time-based rotation

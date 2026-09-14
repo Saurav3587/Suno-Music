@@ -7,11 +7,7 @@ import { useMusic } from '../context/MusicContext';
 
 const VoiceSearch = registerPlugin('VoiceSearch');
 
-const SpotifyIcon = ({ size = 12, color = '#ffffff' }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ flexShrink: 0 }}>
-    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.516 17.307c-.218.358-.686.471-1.044.253-2.864-1.75-6.47-2.146-10.718-1.176-.411.094-.823-.16-.917-.571-.094-.411.16-.823.571-.917 4.654-1.063 8.647-.611 11.855 1.348.358.218.471.686.253 1.063zm1.472-3.276c-.275.447-.86.589-1.307.314-3.28-2.016-8.28-2.599-12.16-1.421-.502.152-1.037-.133-1.189-.635-.152-.502.133-1.037.635-1.189 4.433-1.344 9.94-.7-13.626 1.564.447.275.589.86.314 1.307zm.126-3.41c-3.933-2.336-10.426-2.55-14.204-1.403-.604.183-1.246-.162-1.429-.766-.183-.604.162-1.246.766-1.429 4.343-1.318 11.516-1.069 16.037 1.614.542.322.721 1.026.399 1.568-.322.542-1.026.721-1.568.399z" />
-  </svg>
-);
+
 
 const YoutubeIcon = ({ size = 13, color = '#ffffff' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
@@ -31,7 +27,7 @@ const QUICK_SEARCH_CHIPS = [
   { label: 'Global Top Hits', query: 'global top hits' }
 ];
 
-const SPOTIFY_CATEGORIES = [
+const POPULAR_GENRES = [
   { id: 'bollywood', title: 'Bollywood', query: 'bollywood top hits', gradient: 'linear-gradient(135deg, #f7971e 0%, #ffd200 100%)' },
   { id: 'punjabi', title: 'Punjabi', query: 'punjabi hits', gradient: 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)' },
   { id: 'pop', title: 'Pop & Viral', query: 'pop hits', gradient: 'linear-gradient(135deg, #ff0844 0%, #ffb199 100%)' },
@@ -48,7 +44,6 @@ const SPOTIFY_CATEGORIES = [
 
 function PlaylistSearchCard({ playlist, onSelect }) {
   const isYt = playlist.source === 'youtube';
-  const isSp = playlist.source === 'spotify';
 
   return (
     <div
@@ -62,9 +57,9 @@ function PlaylistSearchCard({ playlist, onSelect }) {
           loading="lazy"
         />
         {/* Source Badge */}
-        <div className={`playlist-search-badge ${isYt ? 'yt' : isSp ? 'sp' : 'custom'}`}>
-          {isYt ? <YoutubeIcon size={12} color="#ffffff" /> : isSp ? <SpotifyIcon size={11} color="#ffffff" /> : <Sparkles size={10} color="#ffffff" />}
-          <span>{playlist.badge || (isYt ? 'YouTube Music' : 'Playlist')}</span>
+        <div className={`playlist-search-badge ${isYt ? 'yt' : 'custom'}`}>
+          {isYt ? <YoutubeIcon size={12} color="#ffffff" /> : <Sparkles size={10} color="#ffffff" />}
+          <span>{playlist.badge || (isYt ? 'YouTube Music' : 'Curated')}</span>
         </div>
 
         {/* Play Overlay Button */}
@@ -297,8 +292,8 @@ export default function SearchView({
               seenTitles.add(key);
               combined.push({
                 ...s,
-                badge: 'Studio 320k',
-                isSpotify: true
+                badge: s.badge || 'Studio 320k',
+                isSpotify: s.source !== 'youtube'
               });
             }
           });
@@ -706,7 +701,7 @@ export default function SearchView({
             </div>
 
             <div className="spotify-browse-grid">
-              {SPOTIFY_CATEGORIES.map(cat => (
+              {POPULAR_GENRES.map(cat => (
                 <div
                   key={cat.id}
                   className="spotify-browse-card"
@@ -739,7 +734,7 @@ export default function SearchView({
               <div className="eq-bar" />
               <div className="eq-bar" />
             </div>
-            <span>Searching 320k songs and Spotify playlists...</span>
+            <span>Searching official songs and curated playlists...</span>
           </div>
         ) : query ? (
           <>
@@ -750,7 +745,7 @@ export default function SearchView({
                   <div className="section-header" style={{ paddingTop: '4px' }}>
                     <div className="section-title">
                       <Sparkles size={16} color="#ff3b68" />
-                      <span>{displayedResults.length} Studio Master Songs</span>
+                      <span>{displayedResults.length} Official Songs</span>
                     </div>
                   </div>
                 )}
