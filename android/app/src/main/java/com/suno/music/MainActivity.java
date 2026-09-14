@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         androidx.core.splashscreen.SplashScreen.installSplashScreen(this);
         registerPlugin(MusicNotificationPlugin.class);
         registerPlugin(AppUpdatePlugin.class);
+        registerPlugin(VoiceSearchPlugin.class);
         super.onCreate(savedInstanceState);
         WebView.setWebContentsDebuggingEnabled(true);
         try {

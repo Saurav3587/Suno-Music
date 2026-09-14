@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Music, Sparkles, Flame, ListMusic, Play, Compass, Layers, Clock, Mic, MicOff } from 'lucide-react';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import SongRow from '../components/SongRow';
 import SpotifyPlaylistsSection from '../components/SpotifyPlaylistsSection';
 import { useMusic } from '../context/MusicContext';
+
+const VoiceSearch = registerPlugin('VoiceSearch');
 
 const SpotifyIcon = ({ size = 12, color = '#ffffff' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ flexShrink: 0 }}>
@@ -115,8 +118,37 @@ export default function SearchView({
     };
   }, []);
 
-  // Voice Search Handler using Web Speech API
-  const handleVoiceSearch = () => {
+  // Voice Search Handler using Native Android Voice Recognition + Web Speech Fallback
+  const handleVoiceSearch = async () => {
+    // 1. Android Native Platform
+    if (Capacitor.isNativePlatform()) {
+      if (isListening) {
+        setIsListening(false);
+        return;
+      }
+      try {
+        setIsListening(true);
+        setVoiceError(null);
+        const res = await VoiceSearch.startListening();
+        setIsListening(false);
+        if (res && res.value) {
+          const transcript = res.value.trim();
+          setQuery(transcript);
+          addToHistory(transcript);
+          performSearch(transcript);
+        }
+      } catch (err) {
+        setIsListening(false);
+        const raw = typeof err === 'string' ? err : (err?.message || '');
+        if (raw && !raw.toLowerCase().includes('cancel') && !raw.toLowerCase().includes('no speech')) {
+          setVoiceError(raw);
+          setTimeout(() => setVoiceError(null), 3500);
+        }
+      }
+      return;
+    }
+
+    // 2. Web Speech API Fallback (Desktop / Laptop Browser)
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setVoiceError('Voice search is not supported on this browser/device.');
