@@ -1,7 +1,7 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.5",
   "minVersion": "1.0.0",
-  "releaseNotes": "• Added Voice Search feature in Search section\n• Fixed AI DJ opening keyboard automatically\n• Seamless in-app APK updater with install permission prompt",
+  "releaseNotes": "• New Sleep Timer mode with live countdown badge & auto-pause\n• 320k Track Download with direct MP3 streaming\n• New Up Next bottom drawer with queue preview & tap-to-play\n• Fixed song repeating loop and smooth playback transitions\n• Optimized single-screen layout and UI responsiveness",
   "forceUpdate": false,
   "apkUrl": "/api/update/apk"
 }
