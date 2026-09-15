@@ -650,22 +650,30 @@ export function MusicProvider({ children }) {
     return track;
   };
 
-  const getResolvedAudioUrl = (streamUrl) => {
-    if (!streamUrl) return '';
-    let base = '';
+  const getBackendBase = () => {
     if (typeof window !== 'undefined') {
       const isNative = window.location.protocol === 'capacitor:' || (window.location.hostname === 'localhost' && window.location.port !== '5173');
       if (isNative) {
-        base = localStorage.getItem('suno_custom_backend') || 'https://suno-music-x6c4.onrender.com';
+        return localStorage.getItem('suno_custom_backend') || 'https://suno-music-x6c4.onrender.com';
       }
     }
-    const isSaavnCdnUrl = /^https:\/\/[^/]+\.saavncdn\.com\//i.test(streamUrl);
-    if (isSaavnCdnUrl) {
-      return `${base}/api/audio?url=${encodeURIComponent(streamUrl)}`;
-    }
+    return '';
+  };
+
+  const getProxiedAudioUrl = (streamUrl) => {
+    if (!streamUrl) return '';
+    const base = getBackendBase();
+    return `${base}/api/audio?url=${encodeURIComponent(streamUrl)}`;
+  };
+
+  const getResolvedAudioUrl = (streamUrl) => {
+    if (!streamUrl) return '';
+    const base = getBackendBase();
+    // Relative endpoints (e.g. /api/...) need backend base in native WebView
     if (streamUrl.startsWith('/')) {
       return `${base}${streamUrl}`;
     }
+    // High-speed Akamai CDN audio (e.g. https://aac.saavncdn.com/...) streams DIRECTLY for instant <100ms playback!
     return streamUrl;
   };
 
@@ -708,39 +716,15 @@ export function MusicProvider({ children }) {
       }
     }
 
-    // Update queue with deduplication
+    // Update queue with deduplication (preserve search results immediately with 0 delay)
     let targetQueue = queueRef.current || [];
-    if (options.isFromSearch) {
-      // From search: initialize with activeSong and immediately build the smart mood/genre radio queue
-      targetQueue = [activeSong];
-      setQueue(targetQueue);
-      queueRef.current = targetQueue;
-
-      fetch('/api/radio/similar-queue', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          seedSong: activeSong,
-          candidateTracks: Array.isArray(newQueue) ? newQueue : []
-        })
-      })
-        .then(res => res.json())
-        .then(data => {
-          if (data && Array.isArray(data.songs) && data.songs.length > 0) {
-            const smartQueue = deduplicateQueue(data.songs);
-            setQueue(smartQueue);
-            queueRef.current = smartQueue;
-            setQueueIndex(0);
-            queueIndexRef.current = 0;
-            if (data.moodLabel) setRadioMoodLabel(data.moodLabel);
-          }
-        })
-        .catch(err => console.warn('Smart mood queue fetch failed:', err));
-    } else if (newQueue && Array.isArray(newQueue)) {
+    if (newQueue && Array.isArray(newQueue) && newQueue.length > 0) {
       targetQueue = deduplicateQueue(newQueue);
       setQueue(targetQueue);
       queueRef.current = targetQueue;
-      setRadioMoodLabel('');
+      if (!options.isFromSearch) {
+        setRadioMoodLabel('');
+      }
     } else if (targetQueue.length === 0 || !targetQueue.some(s => s.id === activeSong.id)) {
       targetQueue = deduplicateQueue([activeSong, ...targetQueue.filter(s => s.id !== activeSong.id)]);
       setQueue(targetQueue);
@@ -923,7 +907,9 @@ export function MusicProvider({ children }) {
     } catch (e) {
       console.warn('Autoplay prefetch failed:', e.message);
     } finally {
-      isPrefetchingRef.current = false;
+      setTimeout(() => {
+        isPrefetchingRef.current = false;
+      }, 1500);
     }
   };
 

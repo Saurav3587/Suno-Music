@@ -70,13 +70,11 @@ export default function YouTubeEngine({
             } else if (e.data === window.YT.PlayerState.PAUSED) {
               onStateChange(false);
             } else if (e.data === window.YT.PlayerState.ENDED) {
-              onStateChange(false);
               if (onEnded) onEnded();
             }
           },
           onError: (e) => {
             console.warn('YouTube embed error code:', e.data, '(restricted video). Auto-skipping to next track...');
-            onStateChange(false);
             if (onEnded) {
               setTimeout(() => onEnded(), 250);
             }

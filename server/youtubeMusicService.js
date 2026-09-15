@@ -11,6 +11,10 @@ let initPromise = null;
 
 // In-memory cache for deciphered audio URLs (TTL: 2 hours)
 const streamUrlCache = new Map();
+// In-memory cache for YouTube search results (TTL: 10 minutes)
+const ytSearchCache = new Map();
+// In-memory cache for Watch Next recommendations (TTL: 15 minutes)
+const watchNextCache = new Map();
 
 /**
  * Get or initialize the singleton Innertube client
@@ -130,6 +134,12 @@ export async function searchYouTubeMusic(query, limit = 20) {
   if (!query || !query.trim()) return [];
   const cleanQ = query.trim();
 
+  const cacheKey = cleanQ.toLowerCase();
+  const cached = ytSearchCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data.slice(0, limit);
+  }
+
   try {
     const yt = await getInnertube();
 
@@ -178,7 +188,7 @@ export async function searchYouTubeMusic(query, limit = 20) {
           image: thumb,
           badge: 'Official Audio',
           isOriginal: true,
-          streamUrl: `/api/yt/audio?id=${v.id}`,
+          streamUrl: null,
           authenticityScore: score + 10 // bonus for YouTube's top ranked search
         });
       }
@@ -215,7 +225,7 @@ export async function searchYouTubeMusic(query, limit = 20) {
           image: thumb,
           badge: 'Official Audio',
           isOriginal: true,
-          streamUrl: `/api/yt/audio?id=${item.id}`,
+          streamUrl: null,
           authenticityScore: score
         });
       }
@@ -224,6 +234,7 @@ export async function searchYouTubeMusic(query, limit = 20) {
     // Sort by authenticity score descending
     candidates.sort((a, b) => (b.authenticityScore || 0) - (a.authenticityScore || 0));
 
+    ytSearchCache.set(cacheKey, { data: candidates, expiresAt: Date.now() + 10 * 60 * 1000 });
     return candidates.slice(0, limit);
   } catch (err) {
     console.warn('⚠️ [YouTube Engine] Search warning:', err.message);
@@ -237,6 +248,12 @@ export async function searchYouTubeMusic(query, limit = 20) {
  */
 export async function getYouTubeWatchNextSongs(seedSong, limit = 20) {
   if (!seedSong) return [];
+
+  const cacheKey = seedSong.youtubeId || `${seedSong.title || ''}_${seedSong.artist || ''}`.toLowerCase().trim();
+  const cached = watchNextCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data.slice(0, limit);
+  }
 
   try {
     const yt = await getInnertube();
@@ -305,12 +322,13 @@ export async function getYouTubeWatchNextSongs(seedSong, limit = 20) {
         image: thumb,
         badge: 'Official Audio',
         isOriginal: true,
-        streamUrl: `/api/yt/audio?id=${id}`
+        streamUrl: null
       });
 
       if (results.length >= limit) break;
     }
 
+    watchNextCache.set(cacheKey, { data: results, expiresAt: Date.now() + 15 * 60 * 1000 });
     return results;
   } catch (err) {
     console.warn('⚠️ [YouTube Engine] Watch Next error:', err.message);

@@ -51,75 +51,38 @@ export async function searchSongs(query, limit = 25) {
   if (!query || !query.trim()) return [];
   const cleanQ = query.trim();
 
-  // Run YouTube search and JioSaavn in parallel
-  const [ytRes, saavnRes] = await Promise.allSettled([
-    searchYouTubeMusic(cleanQ, limit),
-    fetchJioSaavn({
+  // 1. Fast JioSaavn 320kbps Studio Master catalog (responds in ~280ms)
+  try {
+    const data = await fetchJioSaavn({
       __call: 'search.getResults',
       q: cleanQ,
       n: limit.toString(),
       p: '1'
-    })
-  ]);
+    });
+    const rawList = data?.results || [];
+    const saavnTracks = rawList
+      .map(normalizeSong)
+      .filter(s => s && s.streamUrl && isCleanTrack(s))
+      .map(s => ({
+        ...s,
+        badge: 'Studio Master',
+        isOriginal: true
+      }));
 
-  // Build a lookup map of JioSaavn 320k direct master streams for zero-server-bandwidth playback
-  const saavnStreamMap = new Map();
-  const saavnList = [];
-  if (saavnRes.status === 'fulfilled' && saavnRes.value?.results) {
-    for (const raw of saavnRes.value.results) {
-      const s = normalizeSong(raw);
-      if (s && s.streamUrl && isCleanTrack(s)) {
-        const key = `${(s.title || '').toLowerCase().trim()}_${(s.artist || '').toLowerCase().trim().split(/[,&]/)[0]}`;
-        if (!saavnStreamMap.has(key)) {
-          saavnStreamMap.set(key, s);
-          saavnList.push({
-            ...s,
-            badge: 'Studio Master',
-            isOriginal: true
-          });
-        }
-      }
+    // If JioSaavn returned enough high-quality studio tracks, return immediately in ~280ms!
+    if (saavnTracks.length >= Math.min(limit, 8)) {
+      return deduplicateTrackList(saavnTracks, { maxCount: limit });
     }
+
+    // Supplement with YouTube search if JioSaavn returned few results
+    const ytTracks = await searchYouTubeMusic(cleanQ, limit).catch(() => []);
+    const combined = [...saavnTracks, ...ytTracks];
+    return deduplicateTrackList(combined, { maxCount: limit });
+  } catch (err) {
+    console.warn('JioSaavn search fallback to YouTube:', err.message);
+    const ytTracks = await searchYouTubeMusic(cleanQ, limit).catch(() => []);
+    return deduplicateTrackList(ytTracks, { maxCount: limit });
   }
-
-  const combined = [];
-  const seenKeys = new Set();
-
-  // 1. YouTube Primary Results (YouTube's exact search algorithm & ranking)
-  if (ytRes.status === 'fulfilled' && Array.isArray(ytRes.value)) {
-    for (const ytSong of ytRes.value) {
-      const key = `${(ytSong.title || '').toLowerCase().trim()}_${(ytSong.artist || '').toLowerCase().trim().split(/[,&]/)[0]}`;
-      if (seenKeys.has(key)) continue;
-      seenKeys.add(key);
-
-      // If JioSaavn has the direct 320k CDN master stream, use it to save server bandwidth & provide 320k audio
-      const directSaavn = saavnStreamMap.get(key);
-      if (directSaavn && directSaavn.streamUrl) {
-        combined.push({
-          ...ytSong,
-          streamUrl: directSaavn.streamUrl,
-          duration: directSaavn.duration || ytSong.duration,
-          badge: 'Studio Master'
-        });
-      } else {
-        combined.push({
-          ...ytSong,
-          badge: 'Official Audio'
-        });
-      }
-    }
-  }
-
-  // 2. Append any additional clean studio tracks found by JioSaavn
-  for (const s of saavnList) {
-    const key = `${(s.title || '').toLowerCase().trim()}_${(s.artist || '').toLowerCase().trim().split(/[,&]/)[0]}`;
-    if (!seenKeys.has(key)) {
-      seenKeys.add(key);
-      combined.push(s);
-    }
-  }
-
-  return deduplicateTrackList(combined, { maxCount: limit });
 }
 
 // Seeded PRNG shuffle helper for consistent time-based rotation

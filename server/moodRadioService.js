@@ -113,36 +113,36 @@ export async function generateSimilarMoodQueue(seedSong, candidateTracks = []) {
 
   const detected = detectSongMoodAndGenre(seedSong);
 
-  // 1. YouTube Watch Next / Songs Playing Algorithm (primary recommendation engine)
-  let ytWatchNextSongs = [];
-  try {
-    ytWatchNextSongs = await getYouTubeWatchNextSongs(seedSong, 20);
-  } catch (ytErr) {
-    console.warn('YouTube Watch Next queue error:', ytErr.message);
-  }
-
-  // 2. Filter existing candidate tracks matching this mood/vibe
+  // 1. Filter existing candidate tracks matching this mood/vibe
   const matchingCandidates = (candidateTracks || []).filter(t => {
     if (!t || t.id === seedSong.id) return false;
     const itemMood = detectSongMoodAndGenre(t);
     return itemMood.id === detected.id;
   });
 
-  // 3. Fallback queries if YouTube Watch Next returned few items
-  let fallbackTracks = [];
-  if (ytWatchNextSongs.length < 8) {
-    const queryPromises = (detected.queries || []).slice(0, 3).map(q => searchSongs(q, 6));
-    const queryResults = await Promise.all(queryPromises);
-    fallbackTracks = queryResults.flat();
-  }
+  // 2. Fetch high-quality direct 320k studio master tracks for this exact mood in parallel (fast ~280ms)
+  const moodPromises = (detected.queries || []).slice(0, 3).map(q => searchSongs(q, 6).catch(() => []));
 
-  // Assemble queue: [seedSong, ...ytWatchNextSongs, ...matchingCandidates, ...fallbackTracks]
-  const combined = [seedSong, ...ytWatchNextSongs, ...matchingCandidates, ...fallbackTracks];
+  // 3. Fetch YouTube Watch Next with a 1.8s timeout guard so it never stalls queue generation
+  const ytPromise = Promise.race([
+    getYouTubeWatchNextSongs(seedSong, 15).catch(() => []),
+    new Promise(resolve => setTimeout(() => resolve([]), 1800))
+  ]);
+
+  const [moodResults, ytWatchNextSongs] = await Promise.all([
+    Promise.all(moodPromises),
+    ytPromise
+  ]);
+
+  const fetchedMoodTracks = (moodResults || []).flat();
+
+  // Assemble queue: [seedSong, ...matchingCandidates, ...fetchedMoodTracks, ...ytWatchNextSongs]
+  const combined = [seedSong, ...matchingCandidates, ...fetchedMoodTracks, ...(ytWatchNextSongs || [])];
   const deduped = deduplicateTrackList(combined, { maxCount: 35 });
 
   return {
     mood: detected.id,
-    moodLabel: ytWatchNextSongs.length > 0 ? `YouTube Radio • ${seedSong.title}` : detected.label,
+    moodLabel: detected.label || (ytWatchNextSongs?.length > 0 ? `Radio • ${seedSong.title}` : 'Similar Songs'),
     songs: deduped
   };
 }
