@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ChevronDown,
+  ChevronUp,
   Play,
   Pause,
   SkipBack,
@@ -11,10 +12,16 @@ import {
   Heart,
   Plus,
   ListPlus,
+  ListMusic,
   FileText,
   Sparkles,
   Infinity as InfinityIcon,
-  X
+  X,
+  Timer,
+  Download,
+  Loader2,
+  Check,
+  Moon
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useMusic } from '../../context/MusicContext';
@@ -60,6 +67,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
     autoplayEnabled,
     toggleAutoplay,
     queue,
+    queueIndex,
     radioMoodLabel
   } = useMusic();
 
@@ -94,6 +102,132 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
   useEffect(() => {
     fetch('/api/ai/status').then(r => r.json()).then(d => setAiAvailable(d.available)).catch(() => {});
   }, []);
+
+  // Sleep Timer state
+  const [showTimerModal, setShowTimerModal] = useState(false);
+  const [sleepTimerRemaining, setSleepTimerRemaining] = useState(null); // in seconds
+  const [sleepTimerMode, setSleepTimerMode] = useState(null); // 'minutes' | 'end-of-song' | null
+  const [selectedTimerOption, setSelectedTimerOption] = useState(null);
+  const initialTimerTrackIdRef = useRef(null);
+
+  // Sleep Timer interval countdown
+  useEffect(() => {
+    if (sleepTimerMode !== 'minutes' || sleepTimerRemaining === null) return;
+    if (sleepTimerRemaining <= 0) {
+      if (isPlaying) togglePlay();
+      setSleepTimerMode(null);
+      setSelectedTimerOption(null);
+      setSleepTimerRemaining(null);
+      return;
+    }
+
+    const timerId = setInterval(() => {
+      setSleepTimerRemaining(prev => {
+        if (prev === null) return null;
+        if (prev <= 1) {
+          if (isPlaying) togglePlay();
+          setSleepTimerMode(null);
+          setSelectedTimerOption(null);
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timerId);
+  }, [sleepTimerMode, sleepTimerRemaining, isPlaying, togglePlay]);
+
+  // End-of-song sleep timer watcher
+  useEffect(() => {
+    if (sleepTimerMode !== 'end-of-song') return;
+    if (!initialTimerTrackIdRef.current) return;
+
+    if (currentTrack?.id && currentTrack.id !== initialTimerTrackIdRef.current) {
+      if (isPlaying) togglePlay();
+      setSleepTimerMode(null);
+      setSelectedTimerOption(null);
+      initialTimerTrackIdRef.current = null;
+    }
+  }, [currentTrack?.id, sleepTimerMode, isPlaying, togglePlay]);
+
+  const setTimerPreset = (option) => {
+    if (option === 'end-of-song') {
+      setSleepTimerMode('end-of-song');
+      setSelectedTimerOption('end-of-song');
+      initialTimerTrackIdRef.current = currentTrack?.id;
+      setSleepTimerRemaining(null);
+      setShowTimerModal(false);
+    } else if (option === 'off') {
+      setSleepTimerMode(null);
+      setSelectedTimerOption(null);
+      setSleepTimerRemaining(null);
+      initialTimerTrackIdRef.current = null;
+      setShowTimerModal(false);
+    } else {
+      const minutes = Number(option);
+      setSelectedTimerOption(minutes);
+      setSleepTimerRemaining(minutes * 60);
+      setSleepTimerMode('minutes');
+      setShowTimerModal(false);
+    }
+  };
+
+  // Download state & handler
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadNotice, setDownloadNotice] = useState('');
+
+  const handleDownload = async (e) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    if (!currentTrack || isDownloading) return;
+
+    setIsDownloading(true);
+    setDownloadNotice('Starting 320k download...');
+
+    try {
+      const streamUrl = currentTrack.streamUrl || '';
+      const youtubeId = currentTrack.youtubeId || (currentTrack.id && String(currentTrack.id).startsWith('yt_') ? String(currentTrack.id).replace('yt_', '') : '');
+      const title = currentTrack.title || 'Track';
+      const artist = currentTrack.artist || 'Suno Music';
+
+      const downloadUrl = `/api/download?url=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&youtubeId=${encodeURIComponent(youtubeId)}`;
+
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.setAttribute('download', `${title} - ${artist}.mp3`);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      confetti({
+        particleCount: 26,
+        spread: 60,
+        origin: { y: 0.8 },
+        colors: ['#00e676', '#00b0ff', '#1db954']
+      });
+      setDownloadNotice('Download started!');
+    } catch (err) {
+      console.error('Download error:', err);
+      setDownloadNotice('Download failed');
+    } finally {
+      setTimeout(() => {
+        setIsDownloading(false);
+        setDownloadNotice('');
+      }, 2500);
+    }
+  };
+
+  // Up Next state & computed upcoming queue
+  const [showUpNext, setShowUpNext] = useState(false);
+
+  const effectiveQueueIndex = (typeof queueIndex === 'number' && queueIndex >= 0)
+    ? queueIndex
+    : (queue ? queue.findIndex(t => t.id === currentTrack?.id) : -1);
+
+  const upcomingTracks = (queue && queue.length > 0)
+    ? (effectiveQueueIndex >= 0 ? queue.slice(effectiveQueueIndex + 1) : queue.filter(t => t.id !== currentTrack?.id))
+    : [];
+
+  const nextTrack = upcomingTracks[0] || null;
 
 
 
@@ -298,13 +432,36 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
           <span className="player-playlist-name">Suno Music</span>
         </div>
 
-        <button
-          className="action-btn"
-          onClick={handleAddPlaylist}
-          title="Add to Playlist"
-        >
-          <Plus size={22} />
-        </button>
+        <div className="player-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Sleep Timer badge / button */}
+          <button
+            className={`action-btn player-timer-btn ${sleepTimerMode ? 'timer-active' : ''}`}
+            onClick={() => setShowTimerModal(true)}
+            title={sleepTimerMode ? 'Sleep timer active' : 'Set sleep timer'}
+          >
+            {sleepTimerMode === 'minutes' && sleepTimerRemaining !== null ? (
+              <span className="timer-countdown-badge">
+                <Moon size={12} />
+                <span>{Math.floor(sleepTimerRemaining / 60)}:{(sleepTimerRemaining % 60).toString().padStart(2, '0')}</span>
+              </span>
+            ) : sleepTimerMode === 'end-of-song' ? (
+              <span className="timer-countdown-badge">
+                <Moon size={12} />
+                <span>End</span>
+              </span>
+            ) : (
+              <Timer size={20} />
+            )}
+          </button>
+
+          <button
+            className="action-btn"
+            onClick={handleAddPlaylist}
+            title="Add to Playlist"
+          >
+            <Plus size={22} />
+          </button>
+        </div>
       </div>
 
       {/* Center: Album Art Card or Lyrics */}
@@ -371,6 +528,19 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
             <div className="player-song-artist">{track.artist || 'Unknown Artist'}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              className={`action-btn download-btn ${isDownloading ? 'downloading' : ''}`}
+              onClick={handleDownload}
+              title="Download 320k Track"
+              disabled={isDownloading}
+            >
+              {isDownloading ? (
+                <Loader2 size={20} className="spin-loader" />
+              ) : (
+                <Download size={20} />
+              )}
+            </button>
+
             <button
               className="action-btn heart-burst"
               onClick={handleLikeWithConfetti}
@@ -493,6 +663,29 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
             <Repeat size={20} color={repeatMode === 'all' ? '#ff3b68' : 'currentColor'} />
           )}
         </button>
+      </div>
+
+      {/* Up Next Bottom Peek Bar */}
+      <div
+        className="player-up-next-peek"
+        onClick={() => setShowUpNext(true)}
+        role="button"
+        tabIndex={0}
+        title="Open Up Next queue"
+      >
+        <div className="up-next-peek-left">
+          <ListMusic size={15} className="up-next-icon" />
+          <span className="up-next-tag">UP NEXT:</span>
+          <span className="up-next-title">
+            {nextTrack ? `${nextTrack.title} • ${nextTrack.artist}` : (autoplayEnabled ? 'Infinite Smart Flow ready' : 'Queue ended')}
+          </span>
+        </div>
+        <div className="up-next-peek-right">
+          {upcomingTracks.length > 0 && (
+            <span className="up-next-badge">+{upcomingTracks.length}</span>
+          )}
+          <ChevronUp size={15} className="up-next-chevron" />
+        </div>
       </div>
 
 
@@ -770,6 +963,154 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
         </button>
       </div>
     </div>
+
+    {/* Toast Notice (Download / Feedback) */}
+    {downloadNotice && (
+      <div className="player-toast-notice">
+        <Sparkles size={14} color="#00e676" />
+        <span>{downloadNotice}</span>
+      </div>
+    )}
+
+    {/* Sleep Timer Modal */}
+    {showTimerModal && (
+      <div className="player-modal-backdrop" onClick={() => setShowTimerModal(false)}>
+        <div className="player-modal-card" onClick={e => e.stopPropagation()}>
+          <div className="player-modal-header">
+            <div className="player-modal-title-group">
+              <div className="modal-icon-badge">
+                <Moon size={16} color="#ffffff" />
+              </div>
+              <div>
+                <div className="modal-title">Sleep Timer</div>
+                <div className="modal-subtitle">
+                  {sleepTimerMode === 'minutes' && sleepTimerRemaining !== null
+                    ? `Active: ${Math.floor(sleepTimerRemaining / 60)}m ${sleepTimerRemaining % 60}s remaining`
+                    : sleepTimerMode === 'end-of-song'
+                    ? 'Active: Pauses when this song ends'
+                    : 'Audio will automatically pause'}
+                </div>
+              </div>
+            </div>
+            <button
+              className="modal-close-btn"
+              onClick={() => setShowTimerModal(false)}
+              title="Close"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="timer-options-list">
+            {[
+              { label: '15 Minutes', value: 15 },
+              { label: '30 Minutes', value: 30 },
+              { label: '45 Minutes', value: 45 },
+              { label: '60 Minutes', value: 60 },
+              { label: 'End of This Song', value: 'end-of-song' },
+              { label: 'Turn Off Timer', value: 'off', isOff: true }
+            ].map(opt => {
+              const isSelected = selectedTimerOption === opt.value || (opt.value === 'off' && !sleepTimerMode);
+              return (
+                <button
+                  key={opt.label}
+                  className={`timer-option-btn ${isSelected ? 'selected' : ''} ${opt.isOff ? 'off-opt' : ''}`}
+                  onClick={() => setTimerPreset(opt.value)}
+                >
+                  <span>{opt.label}</span>
+                  {isSelected && <Check size={16} className="timer-check-icon" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Up Next Sliding Drawer */}
+    {showUpNext && (
+      <div className="up-next-drawer-backdrop" onClick={() => setShowUpNext(false)}>
+        <div className="up-next-drawer-panel" onClick={e => e.stopPropagation()}>
+          <div className="drawer-drag-handle" />
+          <div className="drawer-header">
+            <div className="drawer-title-group">
+              <ListMusic size={18} color="#ff758c" />
+              <span className="drawer-title">Playing Queue</span>
+              <span className="drawer-count-pill">{upcomingTracks.length} upcoming</span>
+            </div>
+            <button className="modal-close-btn" onClick={() => setShowUpNext(false)} title="Close">
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Currently Playing Track Highlight */}
+          <div className="drawer-now-playing-item">
+            <span className="drawer-item-state">Now Playing</span>
+            <div className="drawer-track-row active-track">
+              <img
+                src={track.image || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=100&auto=format&fit=crop&q=80'}
+                alt={track.title}
+                className="drawer-track-img"
+              />
+              <div className="drawer-track-info">
+                <div className="drawer-track-title">{track.title}</div>
+                <div className="drawer-track-artist">{track.artist}</div>
+              </div>
+              <div className="drawer-equalizer">
+                <span className="eq-bar" />
+                <span className="eq-bar" />
+                <span className="eq-bar" />
+              </div>
+            </div>
+          </div>
+
+          {/* Upcoming items list */}
+          <div className="drawer-queue-list">
+            <div className="drawer-section-label">Up Next</div>
+            {upcomingTracks.length === 0 ? (
+              <div className="drawer-empty-state">
+                <p>No more songs in queue.</p>
+                {autoplayEnabled ? (
+                  <span className="empty-sub">Smart Flow is active — similar tracks will autoplay continuously.</span>
+                ) : (
+                  <span className="empty-sub">Turn on Smart Flow or select songs from search to build your queue.</span>
+                )}
+              </div>
+            ) : (
+              upcomingTracks.map((item, idx) => {
+                const actualQueueIndex = effectiveQueueIndex >= 0 ? effectiveQueueIndex + 1 + idx : idx;
+                return (
+                  <div
+                    key={`${item.id || item.title}-${idx}`}
+                    className="drawer-track-row"
+                    onClick={() => {
+                      playSong(item, queue, { isPlaylist: true, isQueueAdvance: true, advanceIndex: actualQueueIndex });
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <span className="drawer-track-num">{idx + 1}</span>
+                    <img
+                      src={item.image || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=100&auto=format&fit=crop&q=80'}
+                      alt={item.title}
+                      className="drawer-track-img"
+                      loading="lazy"
+                    />
+                    <div className="drawer-track-info">
+                      <div className="drawer-track-title">{item.title}</div>
+                      <div className="drawer-track-artist">{item.artist}</div>
+                    </div>
+                    {item.duration ? (
+                      <span className="drawer-track-duration">{formatTime(item.duration)}</span>
+                    ) : null}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+    )}
   </div>
 );
 }
