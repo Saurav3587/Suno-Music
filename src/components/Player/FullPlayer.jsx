@@ -137,12 +137,14 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
   const cardDirectionRef = useRef('next');
   const prevTrackIdRef = useRef(currentTrack?.id);
 
-  const handleNextTrack = () => {
+  const handleNextTrack = (e) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     cardDirectionRef.current = 'next';
     playNext();
   };
 
-  const handlePrevTrack = () => {
+  const handlePrevTrack = (e) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     cardDirectionRef.current = 'prev';
     playPrev();
   };

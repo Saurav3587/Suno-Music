@@ -407,9 +407,9 @@ app.post('/api/auto-playlist', async (req, res) => {
 
 // Smart Mood & Genre Radio Queue (Guarantees matching mood/genre continuity from search)
 app.post('/api/radio/similar-queue', async (req, res) => {
-  const { seedSong, candidateTracks = [], recentSongs = [] } = req.body;
+  const { seedSong, candidateTracks = [], recentSongs = [], playedTitles = [] } = req.body;
   try {
-    const result = await generateSimilarMoodQueue(seedSong, candidateTracks, recentSongs);
+    const result = await generateSimilarMoodQueue(seedSong, candidateTracks, recentSongs, playedTitles);
     res.json(result);
   } catch (err) {
     console.error('Similar queue generation error:', err);

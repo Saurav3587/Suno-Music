@@ -151,7 +151,10 @@ export default function DesktopPlayer({ onSearchArtist }) {
 
           <button
             className="desktop-control-btn"
-            onClick={playNext}
+            onClick={(e) => {
+              e.stopPropagation();
+              playNext();
+            }}
             title="Next"
           >
             <SkipForward size={19} />

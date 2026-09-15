@@ -90,6 +90,8 @@ export function MusicProvider({ children }) {
   const skippedArtistsRef = useRef([]);
   const playRequestIdRef = useRef(0);
   const lastEndedTrackIdRef = useRef(null);
+  const lastPlayNextTimeRef = useRef(0);
+  const lastPlayPrevTimeRef = useRef(0);
 
   // Persistent refs to always provide latest values to native event listeners & background callbacks
   const queueRef = useRef(queue);
@@ -205,19 +207,43 @@ export function MusicProvider({ children }) {
   // Canonical normalizer to strictly prevent duplicates and repeats
   const getCanonicalTitle = (str) => {
     if (!str) return '';
-    return str
-      .toLowerCase()
-      .replace(/\(.*?\)/g, '')
-      .replace(/\[.*?\]/g, '')
-      .replace(/\b(official\s*(video|audio|music\s*video|lyric.*|full.*))\b/gi, '')
-      .replace(/[-|–—].*$/, '')
-      .replace(/[^a-z0-9]/g, '')
-      .trim();
+    let s = String(str).toLowerCase();
+    // Strip parenthesized and bracketed content
+    s = s.replace(/\(.*?\)/g, ' ').replace(/\[.*?\]/g, ' ');
+
+    // Remove common YouTube and label prefixes
+    s = s.replace(/^(full\s*(song|video|audio)?|video\s*song|lyrical(\s*video)?|official\s*(video|audio|music\s*video|track)?|audio|song|t-series|zee music)\s*[:|\-–—]\s*/gi, ' ');
+
+    // If there are delimiters, pick the most relevant song title segment
+    const parts = s.split(/[:|\-–—]/).map(p => p.trim()).filter(Boolean);
+    const junkWords = /^(official|video|audio|full|song|lyric|lyrical|t-series|zee music|music video|cover|remix|hd|4k|mp3|film version)$/i;
+    let best = '';
+    for (const part of parts) {
+      const cleaned = part.replace(/\b(official\s*(video|audio|music\s*video|lyric.*|full.*|track)|full\s*(song|video|audio)|video\s*song|lyric(al)?\s*(video|song)?|audio\s*song|song|audio|video)\b/gi, '').trim();
+      if (cleaned.length >= 2 && !junkWords.test(cleaned)) {
+        best = cleaned;
+        break;
+      }
+    }
+    if (!best && parts.length > 0) best = parts[0];
+
+    return best.replace(/[^a-z0-9]/gi, '').toLowerCase().trim();
   };
+
+  // Only seed the immediate last 2 tracks from history to prevent instant replay
+  useEffect(() => {
+    if (Array.isArray(recentSongs)) {
+      for (const s of recentSongs.slice(0, 2)) {
+        const norm = getCanonicalTitle(s?.title);
+        if (norm) playedCanonicalTitlesRef.current.add(norm);
+      }
+    }
+  }, [recentSongs]);
 
   const recordRecentSong = (track) => {
     if (!track || !track.id) return;
     const norm = getCanonicalTitle(track.title);
+    if (norm) playedCanonicalTitlesRef.current.add(norm);
     setRecentSongs(prev => {
       const filtered = prev.filter(s => s.id !== track.id && getCanonicalTitle(s.title) !== norm);
       const updated = [track, ...filtered].slice(0, 50);
@@ -265,14 +291,17 @@ export function MusicProvider({ children }) {
   const deduplicateQueue = (songList) => {
     if (!Array.isArray(songList)) return [];
     const seenTitles = new Set();
+    const seenIds = new Set();
     const deduped = [];
     for (const s of songList) {
       if (!s || !s.title) continue;
+      if (s.id && seenIds.has(s.id)) continue;
       const norm = getCanonicalTitle(s.title);
       if (!norm) continue;
       if (norm.length >= 3 && seenTitles.has(norm)) {
         continue;
       }
+      if (s.id) seenIds.add(s.id);
       seenTitles.add(norm);
       deduped.push(s);
     }
@@ -362,7 +391,8 @@ export function MusicProvider({ children }) {
             audio.duration > 5 &&
             cTime >= audio.duration - 0.35 &&
             !audio.paused &&
-            !audio.ended
+            !audio.ended &&
+            !isAdvancingTrackRef.current
           ) {
             handleSongEndedRef.current?.();
           }
@@ -398,14 +428,14 @@ export function MusicProvider({ children }) {
 
     const onEnded = () => {
       const isIframeYt = currentTrackRef.current?.source === 'youtube' && !currentTrackRef.current?.streamUrl;
-      if (!isIframeYt) {
+      if (!isIframeYt && !isAdvancingTrackRef.current) {
         handleSongEndedRef.current?.();
       }
     };
 
     const onError = (e) => {
       console.warn('Audio playback error:', e);
-      // If audio was actively playing and hit a fatal decode/network error, automatically skip to next track
+      // Only auto-skip if audio was actively playing and NOT currently advancing or switching tracks
       if (isPlayingRef.current && !isAdvancingTrackRef.current) {
         setTimeout(() => {
           if (isPlayingRef.current && !isAdvancingTrackRef.current) {
@@ -642,13 +672,28 @@ export function MusicProvider({ children }) {
       const resolveRes = await fetch(`/api/search?q=${q}`);
       const resolveData = await resolveRes.json();
       if (resolveData.results && resolveData.results.length > 0) {
-        return { ...track, ...resolveData.results[0], source: 'saavn' };
+        const found = resolveData.results[0];
+        return {
+          ...found,
+          ...track, // Keep original track identity (id, album, etc.)
+          id: track.id, // Explicitly preserve track.id so queue indexes never break
+          streamUrl: found.streamUrl,
+          duration: found.duration || track.duration,
+          image: track.image || found.image,
+          source: 'saavn',
+          saavnId: found.id
+        };
       }
       if (!track.youtubeId) {
         const ytRes = await fetch(`/api/yt-search?q=${q}`);
         const ytData = await ytRes.json();
         if (ytData.results && ytData.results.length > 0) {
-          return { ...track, ...ytData.results[0] };
+          const ytFound = ytData.results[0];
+          return {
+            ...track,
+            youtubeId: ytFound.youtubeId,
+            source: 'youtube'
+          };
         }
       }
     } catch (e) {
@@ -705,16 +750,12 @@ export function MusicProvider({ children }) {
 
     // Prioritize Studio 320k direct master audio streams over YouTube embeds
     let activeSong = song;
-    if (
-      !activeSong.streamUrl &&
-      activeSong.source !== 'youtube' &&
-      !activeSong.youtubeId
-    ) {
+    if (!activeSong.streamUrl) {
       activeSong = await resolveTrackStreamUrl(activeSong);
       if (currentRequestId !== playRequestIdRef.current) return;
     }
 
-    // Register into anti-repeat memory window
+    // Register into anti-repeat memory window (tracks last 150 songs in this session)
     const activeNorm = getCanonicalTitle(activeSong.title);
     if (activeNorm) {
       playedCanonicalTitlesRef.current.add(activeNorm);
@@ -736,32 +777,48 @@ export function MusicProvider({ children }) {
         if (!options.isFromSearch) {
           setRadioMoodLabel('');
         }
-      } else if (targetQueue.length === 0 || !targetQueue.some(s => s.id === activeSong.id)) {
-        targetQueue = deduplicateQueue([activeSong, ...targetQueue.filter(s => s.id !== activeSong.id)]);
-        setQueue(targetQueue);
-        queueRef.current = targetQueue;
       }
 
-      const index = targetQueue.findIndex(s => s.id === activeSong.id);
-      const resolvedIndex = index !== -1 ? index : 0;
+      let resolvedIndex = typeof options.advanceIndex === 'number' && options.advanceIndex >= 0 && options.advanceIndex < targetQueue.length
+        ? options.advanceIndex
+        : -1;
+
+      if (resolvedIndex === -1) {
+        const normTitle = getCanonicalTitle(activeSong.title);
+        const idxById = targetQueue.findIndex(s => s.id === activeSong.id || (song?.id && s.id === song.id));
+        const idxByTitle = idxById !== -1 ? idxById : targetQueue.findIndex(s => getCanonicalTitle(s.title) === normTitle);
+        resolvedIndex = idxByTitle !== -1 ? idxByTitle : 0;
+      }
       setQueueIndex(resolvedIndex);
       queueIndexRef.current = resolvedIndex;
+      if (targetQueue[resolvedIndex]) {
+        targetQueue[resolvedIndex] = activeSong;
+        queueRef.current = targetQueue;
+      }
     } else {
-      // User clicked an INDIVIDUAL song (from Search, Home, Discover, Artist page, etc.)
-      // 1. Instantly construct an immediate queue so playback starts with 0 latency (<100ms)
-      const immediateSlice = Array.isArray(newQueue)
-        ? newQueue.filter(s => s && s.id !== activeSong.id).slice(0, 5)
-        : [];
-      targetQueue = deduplicateQueue([activeSong, ...immediateSlice]);
+      // User clicked an INDIVIDUAL song (from Search, Home shelf, Discover, Artist page, etc.)
+      // 1. Build an immediate full queue from the current view/shelf without arbitrary truncation
+      let baseList = [];
+      if (Array.isArray(newQueue) && newQueue.length > 1) {
+        const normTitle = getCanonicalTitle(activeSong.title);
+        const clickedIdx = newQueue.findIndex(s => s?.id === activeSong.id || (song?.id && s?.id === song.id) || getCanonicalTitle(s?.title) === normTitle);
+        if (clickedIdx !== -1) {
+          const after = newQueue.slice(clickedIdx);
+          const before = newQueue.slice(0, clickedIdx);
+          baseList = [...after, ...before];
+        } else {
+          baseList = [activeSong, ...newQueue.filter(s => s?.id !== activeSong.id && s?.id !== song?.id)];
+        }
+      } else {
+        baseList = [activeSong];
+      }
+      targetQueue = deduplicateQueue(baseList);
       setQueue(targetQueue);
       queueRef.current = targetQueue;
       setQueueIndex(0);
       queueIndexRef.current = 0;
 
-      // 2. Concurrently fetch smart mood & genre queue blended with user's recent listening taste
-      const candidateSlice = Array.isArray(newQueue)
-        ? newQueue.filter(s => s && s.id !== activeSong.id).slice(0, 15)
-        : [];
+      // 2. Concurrently fetch smart mood & genre radio to append to the queue for endless variety
       const userHistorySlice = (recentSongsRef.current || recentSongs || []).slice(0, 20);
 
       fetch('/api/radio/similar-queue', {
@@ -769,20 +826,34 @@ export function MusicProvider({ children }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           seedSong: activeSong,
-          candidateTracks: candidateSlice,
-          recentSongs: userHistorySlice
+          candidateTracks: [],
+          recentSongs: userHistorySlice,
+          playedTitles: Array.from(playedCanonicalTitlesRef.current)
         })
       })
         .then(res => res.json())
         .then(data => {
-          if (currentRequestId !== playRequestIdRef.current) return;
           const smartSongs = data.songs || [];
           if (smartSongs.length > 0) {
-            const combined = deduplicateQueue([activeSong, ...smartSongs.filter(s => s.id !== activeSong.id)]);
-            setQueue(combined);
-            queueRef.current = combined;
-            setQueueIndex(0);
-            queueIndexRef.current = 0;
+            setQueue(prevQ => {
+              const activeT = currentTrackRef.current || activeSong;
+              const existingIds = new Set(prevQ.map(s => s?.id));
+              const existingTitles = new Set(prevQ.map(s => getCanonicalTitle(s?.title)));
+              const unplayedSmart = smartSongs.filter(s =>
+                s &&
+                !existingIds.has(s.id) &&
+                !existingTitles.has(getCanonicalTitle(s.title)) &&
+                !playedCanonicalTitlesRef.current.has(getCanonicalTitle(s.title))
+              );
+              if (unplayedSmart.length === 0) return prevQ;
+              const combined = deduplicateQueue([...prevQ, ...unplayedSmart]);
+              queueRef.current = combined;
+              const newIdx = combined.findIndex(s => s.id === activeT?.id);
+              const validIdx = newIdx !== -1 ? newIdx : 0;
+              setQueueIndex(validIdx);
+              queueIndexRef.current = validIdx;
+              return combined;
+            });
           }
           if (data.moodLabel) {
             setRadioMoodLabel(data.moodLabel);
@@ -954,7 +1025,11 @@ export function MusicProvider({ children }) {
       const res = await fetch('/api/radio/similar-queue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seedSong: seed, recentSongs: userHistory })
+        body: JSON.stringify({
+          seedSong: seed,
+          recentSongs: userHistory,
+          playedTitles: Array.from(playedCanonicalTitlesRef.current)
+        })
       });
       const data = await res.json();
       const songs = data.songs || [];
@@ -962,10 +1037,16 @@ export function MusicProvider({ children }) {
       if (songs.length > 0) {
         setQueue(prevQueue => {
           const existingIds = new Set(prevQueue.map(s => s.id));
-          let toAdd = songs.filter(s => !existingIds.has(s.id) && s.id !== seed.id).slice(0, 8);
-          if (toAdd.length === 0) {
-            toAdd = songs.filter(s => s.id !== seed.id).slice(0, 6);
-          }
+          const existingTitles = new Set(prevQueue.map(s => getCanonicalTitle(s.title)));
+
+          const toAdd = songs.filter(s =>
+            s &&
+            s.id !== seed.id &&
+            !existingIds.has(s.id) &&
+            !existingTitles.has(getCanonicalTitle(s.title)) &&
+            !playedCanonicalTitlesRef.current.has(getCanonicalTitle(s.title))
+          ).slice(0, 10);
+
           if (toAdd.length === 0) return prevQueue;
           const updated = [...prevQueue, ...toAdd];
           queueRef.current = updated;
@@ -1039,6 +1120,14 @@ export function MusicProvider({ children }) {
   };
 
   const playNext = async () => {
+    const now = Date.now();
+    if (now - lastPlayNextTimeRef.current < 550) {
+      return; // Debounce rapid double next calls
+    }
+    lastPlayNextTimeRef.current = now;
+    isAdvancingTrackRef.current = true;
+    setTimeout(() => { isAdvancingTrackRef.current = false; }, 850);
+
     const currentQ = queueRef.current || [];
     const currentIndex = queueIndexRef.current;
     const currentRepeat = repeatModeRef.current;
@@ -1083,7 +1172,9 @@ export function MusicProvider({ children }) {
     }
 
     if (nextIndex < currentQ.length) {
-      playSong(currentQ[nextIndex], currentQ, { isPlaylist: true, isQueueAdvance: true });
+      queueIndexRef.current = nextIndex;
+      setQueueIndex(nextIndex);
+      playSong(currentQ[nextIndex], currentQ, { isPlaylist: true, isQueueAdvance: true, advanceIndex: nextIndex });
       // Trigger lookahead prefetch if queue is getting low
       if (currentQ.length - nextIndex <= 3) {
         prefetchAutoplayTracks(currentQ[nextIndex]);
@@ -1095,55 +1186,73 @@ export function MusicProvider({ children }) {
         const res = await fetch('/api/radio/similar-queue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ seedSong: currentT, recentSongs: userHistory })
+          body: JSON.stringify({
+            seedSong: currentT,
+            recentSongs: userHistory,
+            playedTitles: Array.from(playedCanonicalTitlesRef.current)
+          })
         });
         const data = await res.json();
         const items = data.songs || [];
         const existingIds = new Set(currentQ.map(s => s.id));
-        let newMatching = items.filter(s => !existingIds.has(s.id) && s.id !== currentT.id);
+        const existingTitles = new Set(currentQ.map(s => getCanonicalTitle(s.title)));
 
-        // If all items already exist in recent queue, relax duplicate check
-        if (newMatching.length === 0 && items.length > 0) {
-          newMatching = items.filter(s => s.id !== currentT.id).slice(0, 10);
-        }
+        const newMatching = items.filter(s =>
+          s &&
+          s.id !== currentT.id &&
+          !existingIds.has(s.id) &&
+          !existingTitles.has(getCanonicalTitle(s.title)) &&
+          !playedCanonicalTitlesRef.current.has(getCanonicalTitle(s.title))
+        );
 
         if (newMatching.length > 0) {
           const combinedQueue = deduplicateQueue([...currentQ, ...newMatching]);
+          const newIdx = currentQ.length;
           setQueue(combinedQueue);
           queueRef.current = combinedQueue;
+          setQueueIndex(newIdx);
+          queueIndexRef.current = newIdx;
           if (data.moodLabel) setRadioMoodLabel(data.moodLabel);
-          playSong(newMatching[0], combinedQueue, { isPlaylist: true, isQueueAdvance: true });
+          playSong(newMatching[0], combinedQueue, { isPlaylist: true, isQueueAdvance: true, advanceIndex: newIdx });
           return;
         }
 
-        // Fallback: fetch trending songs so autoplay flow NEVER stops
-        const trendRes = await fetch('/api/recommend?limit=15');
+        // Fallback: fetch fresh trending or discovery songs that haven't been played in this session
+        const trendRes = await fetch('/api/recommend?limit=25');
         const trendData = await trendRes.json();
         const trendSongs = trendData.songs || [];
-        const freshTrending = trendSongs.filter(s => s.id !== currentT.id && !existingIds.has(s.id));
-        const toAdd = freshTrending.length > 0 ? freshTrending : trendSongs.filter(s => s.id !== currentT.id);
+        const freshTrending = trendSongs.filter(s =>
+          s &&
+          s.id !== currentT.id &&
+          !existingIds.has(s.id) &&
+          !existingTitles.has(getCanonicalTitle(s.title)) &&
+          !playedCanonicalTitlesRef.current.has(getCanonicalTitle(s.title))
+        );
 
-        if (toAdd.length > 0) {
-          const combinedQueue = deduplicateQueue([...currentQ, ...toAdd]);
+        if (freshTrending.length > 0) {
+          const combinedQueue = deduplicateQueue([...currentQ, ...freshTrending]);
+          const newIdx = currentQ.length;
           setQueue(combinedQueue);
           queueRef.current = combinedQueue;
-          playSong(toAdd[0], combinedQueue, { isPlaylist: true, isQueueAdvance: true });
+          setQueueIndex(newIdx);
+          queueIndexRef.current = newIdx;
+          playSong(freshTrending[0], combinedQueue, { isPlaylist: true, isQueueAdvance: true, advanceIndex: newIdx });
           return;
         }
       } catch (err) {
         console.warn('Autoplay fetch failed:', err);
       }
 
-      // If all network recommendation calls failed, loop back to beginning of queue so music never dies
-      if (currentQ.length > 0) {
-        playSong(currentQ[0], currentQ, { isPlaylist: true, isQueueAdvance: true });
+      // If all recommendation calls failed, loop back only if repeat is 'all'
+      if (currentRepeat === 'all' && currentQ.length > 0) {
+        playSong(currentQ[0], currentQ, { isPlaylist: true, isQueueAdvance: true, advanceIndex: 0 });
       } else {
         setIsPlaying(false);
         isPlayingRef.current = false;
       }
     } else {
-      if (currentRepeat === 'all' || currentQ.length > 0) {
-        playSong(currentQ[0], currentQ, { isPlaylist: true, isQueueAdvance: true });
+      if (currentRepeat === 'all' && currentQ.length > 0) {
+        playSong(currentQ[0], currentQ, { isPlaylist: true, isQueueAdvance: true, advanceIndex: 0 });
       } else {
         setIsPlaying(false);
         isPlayingRef.current = false;
@@ -1152,6 +1261,14 @@ export function MusicProvider({ children }) {
   };
 
   const playPrev = () => {
+    const now = Date.now();
+    if (now - lastPlayPrevTimeRef.current < 550) {
+      return; // Debounce rapid double prev calls
+    }
+    lastPlayPrevTimeRef.current = now;
+    isAdvancingTrackRef.current = true;
+    setTimeout(() => { isAdvancingTrackRef.current = false; }, 850);
+
     const currentPos = currentTimeRef.current;
     if (currentPos > 3) {
       seekTo(0);
@@ -1163,10 +1280,15 @@ export function MusicProvider({ children }) {
 
     let prevIndex = currentIndex - 1;
     if (prevIndex >= 0) {
-      playSong(currentQ[prevIndex], currentQ, { isPlaylist: true, isQueueAdvance: true });
+      queueIndexRef.current = prevIndex;
+      setQueueIndex(prevIndex);
+      playSong(currentQ[prevIndex], currentQ, { isPlaylist: true, isQueueAdvance: true, advanceIndex: prevIndex });
     } else {
       if (repeatModeRef.current === 'all') {
-        playSong(currentQ[currentQ.length - 1], currentQ, { isPlaylist: true, isQueueAdvance: true });
+        const lastIdx = currentQ.length - 1;
+        queueIndexRef.current = lastIdx;
+        setQueueIndex(lastIdx);
+        playSong(currentQ[lastIdx], currentQ, { isPlaylist: true, isQueueAdvance: true, advanceIndex: lastIdx });
       } else {
         seekTo(0);
       }

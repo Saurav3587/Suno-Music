@@ -100,7 +100,10 @@ export default function MiniPlayer() {
 
           <button
             className="action-btn"
-            onClick={playNext}
+            onClick={(e) => {
+              e.stopPropagation();
+              playNext();
+            }}
             title="Next Track"
           >
             <SkipForward size={20} />
