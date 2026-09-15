@@ -6,6 +6,7 @@ export default function SongRow({
   song,
   index,
   playlist = null,
+  isPlaylist = false,
   onAddToPlaylist = null,
   onOpenNote = null,
   isFromSearch = false,
@@ -25,7 +26,7 @@ export default function SongRow({
     if (isCurrent) {
       togglePlay();
     } else {
-      playSong(song, playlist, { isFromSearch });
+      playSong(song, playlist, { isPlaylist, isFromSearch });
     }
   };
 

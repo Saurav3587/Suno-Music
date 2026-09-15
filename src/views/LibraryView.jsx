@@ -82,12 +82,12 @@ function PlaylistDetail({ playlist, isLiked, onBack, onOpenAddToPlaylist, userNa
   const dur = totalDuration(songs);
 
   const handlePlay = () => {
-    if (songs.length > 0) playSong(songs[0], songs);
+    if (songs.length > 0) playSong(songs[0], songs, { isPlaylist: true });
   };
 
   const handleShuffle = () => {
     const shuffled = [...songs].sort(() => Math.random() - 0.5);
-    if (shuffled.length > 0) playSong(shuffled[0], shuffled);
+    if (shuffled.length > 0) playSong(shuffled[0], shuffled, { isPlaylist: true });
   };
 
   return (
@@ -163,6 +163,7 @@ function PlaylistDetail({ playlist, isLiked, onBack, onOpenAddToPlaylist, userNa
                 song={song}
                 index={i}
                 playlist={songs}
+                isPlaylist={true}
                 onAddToPlaylist={onOpenAddToPlaylist}
               />
               {/* Remove button (not on liked songs) */}
@@ -255,7 +256,7 @@ export default function LibraryView({
   const handlePlayCard = (e, pl) => {
     e.stopPropagation();
     const songs = pl.id === '__liked__' ? likedSongs : pl.songs;
-    if (songs.length > 0) playSong(songs[0], songs);
+    if (songs.length > 0) playSong(songs[0], songs, { isPlaylist: true });
   };
 
   /* Filtered view */
@@ -442,7 +443,7 @@ export default function LibraryView({
               </div>
               {likedSongs.length > 0 && (
                 <button
-                  onClick={() => likedSongs.length > 0 && playSong(likedSongs[0], likedSongs)}
+                  onClick={() => likedSongs.length > 0 && playSong(likedSongs[0], likedSongs, { isPlaylist: true })}
                   style={{
                     marginTop: '10px', background: 'var(--gradient-romantic)',
                     border: 'none', borderRadius: '100px', color: '#fff',
@@ -469,6 +470,7 @@ export default function LibraryView({
                 song={song}
                 index={i}
                 playlist={likedSongs}
+                isPlaylist={true}
                 onAddToPlaylist={onOpenAddToPlaylist}
               />
             ))

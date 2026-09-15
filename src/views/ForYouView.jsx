@@ -48,7 +48,7 @@ export default function ForYouView({ onOpenAddToPlaylist, onSearchArtist }) {
 
   const handlePlayAll = () => {
     if (playlist && playlist.songs && playlist.songs.length > 0) {
-      playSong(playlist.songs[0], playlist.songs);
+      playSong(playlist.songs[0], playlist.songs, { isPlaylist: true });
     }
   };
 
@@ -157,6 +157,7 @@ export default function ForYouView({ onOpenAddToPlaylist, onSearchArtist }) {
               song={song}
               index={i}
               playlist={playlist.songs}
+              isPlaylist={true}
               onAddToPlaylist={onOpenAddToPlaylist}
               onSearchArtist={onSearchArtist}
             />

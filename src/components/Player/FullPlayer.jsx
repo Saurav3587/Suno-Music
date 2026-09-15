@@ -119,7 +119,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
 
       if (data.songs && data.songs.length > 0) {
         setAiDjSongsCount(data.songs.length);
-        playSong(data.songs[0], data.songs);
+        playSong(data.songs[0], data.songs, { isPlaylist: true });
       } else {
         setAiDjSongsCount(0);
       }

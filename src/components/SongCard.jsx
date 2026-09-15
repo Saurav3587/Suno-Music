@@ -4,7 +4,7 @@ import { useMusic } from '../context/MusicContext';
 
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=500&auto=format&fit=crop&q=80';
 
-export default function SongCard({ song, playlist = null, onSearchArtist = null }) {
+export default function SongCard({ song, playlist = null, onSearchArtist = null, isPlaylist = false }) {
   const { currentTrack, isPlaying, playSong, togglePlay } = useMusic();
   const isCurrent = currentTrack?.id === song.id;
 
@@ -13,7 +13,7 @@ export default function SongCard({ song, playlist = null, onSearchArtist = null 
     if (isCurrent) {
       togglePlay();
     } else {
-      playSong(song, playlist);
+      playSong(song, playlist, { isPlaylist });
     }
   };
 

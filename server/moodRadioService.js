@@ -106,43 +106,105 @@ export function detectSongMoodAndGenre(song = {}) {
 }
 
 /**
- * Generates an intelligent, cohesive queue of 20-30 songs of the EXACT same mood & genre as the seed song
+ * Generates an intelligent, cohesive queue matching the seed song's genre & mood,
+ * seamlessly blended with the user's recent listening history and favored artists.
  */
-export async function generateSimilarMoodQueue(seedSong, candidateTracks = []) {
+export async function generateSimilarMoodQueue(seedSong, candidateTracks = [], recentSongs = []) {
   if (!seedSong) return { mood: 'general', moodLabel: 'All Songs', songs: [] };
 
   const detected = detectSongMoodAndGenre(seedSong);
+  const seedArtist = (seedSong.artist || '').split(/[,&]/)[0].trim();
 
-  // 1. Filter existing candidate tracks matching this mood/vibe
+  // 1. Analyze User's Recent Listening Taste:
+  // Extract user's favored artists and recent songs that match this exact mood/genre
+  const matchingRecentSongs = [];
+  const recentMatchingArtists = [];
+  const seenArtistNames = new Set();
+  if (seedArtist) seenArtistNames.add(seedArtist.toLowerCase());
+
+  if (Array.isArray(recentSongs)) {
+    for (const rs of recentSongs) {
+      if (!rs || !rs.title || rs.id === seedSong.id) continue;
+      const rsMood = detectSongMoodAndGenre(rs);
+      const rsArtist = (rs.artist || '').split(/[,&]/)[0].trim();
+
+      // Prioritize recent songs that share the exact mood & genre of the seed song
+      if (rsMood.id === detected.id) {
+        matchingRecentSongs.push(rs);
+        if (rsArtist && !seenArtistNames.has(rsArtist.toLowerCase())) {
+          seenArtistNames.add(rsArtist.toLowerCase());
+          recentMatchingArtists.push(rsArtist);
+        }
+      } else if (rsArtist && !seenArtistNames.has(rsArtist.toLowerCase())) {
+        seenArtistNames.add(rsArtist.toLowerCase());
+      }
+    }
+  }
+
+  // 2. Filter existing candidate tracks (from current search / view) matching this mood
   const matchingCandidates = (candidateTracks || []).filter(t => {
     if (!t || t.id === seedSong.id) return false;
     const itemMood = detectSongMoodAndGenre(t);
     return itemMood.id === detected.id;
   });
 
-  // 2. Fetch high-quality direct 320k studio master tracks for this exact mood in parallel (fast ~280ms)
-  const moodPromises = (detected.queries || []).slice(0, 3).map(q => searchSongs(q, 6).catch(() => []));
+  // 3. Build queries combining the Mood/Genre + User's Recent Listening Affinity:
+  const queriesToRun = [];
 
-  // 3. Fetch YouTube Watch Next with a 1.8s timeout guard so it never stalls queue generation
+  // A. Same artist in this mood/genre
+  if (seedArtist) {
+    queriesToRun.push(`${seedArtist} ${detected.label || 'songs'}`);
+  }
+
+  // B. User's top recent artist matching this genre (personalized taste blending!)
+  if (recentMatchingArtists.length > 0) {
+    const topFavArtist = recentMatchingArtists[0];
+    queriesToRun.push(`${topFavArtist} ${detected.label || 'hits'}`);
+  }
+
+  // C. Curated flagship mood queries
+  if (detected.queries && detected.queries.length > 0) {
+    queriesToRun.push(detected.queries[0]);
+    if (detected.queries.length > 1 && queriesToRun.length < 3) {
+      queriesToRun.push(detected.queries[1]);
+    }
+  }
+
+  // 4. Fetch direct 320k studio master tracks in parallel (fast ~280ms)
+  const queryPromises = queriesToRun.slice(0, 3).map(q => searchSongs(q, 6).catch(() => []));
+
+  // 5. Fetch YouTube Watch Next recommendations with a 1.8s timeout guard
   const ytPromise = Promise.race([
-    getYouTubeWatchNextSongs(seedSong, 15).catch(() => []),
+    getYouTubeWatchNextSongs(seedSong, 12).catch(() => []),
     new Promise(resolve => setTimeout(() => resolve([]), 1800))
   ]);
 
-  const [moodResults, ytWatchNextSongs] = await Promise.all([
-    Promise.all(moodPromises),
+  const [queryResults, ytWatchNextSongs] = await Promise.all([
+    Promise.all(queryPromises),
     ytPromise
   ]);
 
-  const fetchedMoodTracks = (moodResults || []).flat();
+  const fetchedGenreTracks = (queryResults || []).flat();
 
-  // Assemble queue: [seedSong, ...matchingCandidates, ...fetchedMoodTracks, ...ytWatchNextSongs]
-  const combined = [seedSong, ...matchingCandidates, ...fetchedMoodTracks, ...(ytWatchNextSongs || [])];
+  // 6. Assemble in a cohesive, clean progression:
+  // [seedSong, ...immediate candidates (up to 3), ...recent favorites in this genre (up to 4), ...genre tracks, ...yt recommendations]
+  const combined = [
+    seedSong,
+    ...matchingCandidates.slice(0, 3),
+    ...matchingRecentSongs.slice(0, 4),
+    ...fetchedGenreTracks,
+    ...(ytWatchNextSongs || [])
+  ];
+
   const deduped = deduplicateTrackList(combined, { maxCount: 35 });
+
+  const moodLabel = detected.label
+    ? (recentMatchingArtists.length > 0 ? `${detected.label} • For You` : detected.label)
+    : (seedArtist ? `${seedArtist} Radio` : 'Similar Songs');
 
   return {
     mood: detected.id,
-    moodLabel: detected.label || (ytWatchNextSongs?.length > 0 ? `Radio • ${seedSong.title}` : 'Similar Songs'),
+    moodLabel,
     songs: deduped
   };
 }

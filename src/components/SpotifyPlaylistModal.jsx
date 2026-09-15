@@ -61,14 +61,14 @@ export default function SpotifyPlaylistModal({ playlistKeyOrId, initialData, onC
 
   const handlePlayAll = () => {
     if (songs.length > 0) {
-      playSong(songs[0], songs);
+      playSong(songs[0], songs, { isPlaylist: true });
     }
   };
 
   const handleShuffle = () => {
     if (songs.length > 0) {
       const shuffled = [...songs].sort(() => Math.random() - 0.5);
-      playSong(shuffled[0], shuffled);
+      playSong(shuffled[0], shuffled, { isPlaylist: true });
     }
   };
 
@@ -388,6 +388,7 @@ export default function SpotifyPlaylistModal({ playlistKeyOrId, initialData, onC
                   song={song}
                   index={i}
                   playlist={songs}
+                  isPlaylist={true}
                   onAddToPlaylist={onOpenAddToPlaylist}
                 />
               ))

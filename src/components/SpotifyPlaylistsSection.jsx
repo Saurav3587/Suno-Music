@@ -48,7 +48,7 @@ export default function SpotifyPlaylistsSection({ onSelectPlaylist }) {
       const res = await fetch(`/api/spotify/playlist/${playlist.key}`);
       const data = await res.json();
       if (data && data.songs && data.songs.length > 0) {
-        playSong(data.songs[0], data.songs);
+        playSong(data.songs[0], data.songs, { isPlaylist: true });
       }
     } catch (err) {
       console.error('Failed to quick play playlist:', err);

@@ -89,6 +89,7 @@ export function MusicProvider({ children }) {
   const lastSavedTimeRef = useRef(0);
   const skippedArtistsRef = useRef([]);
   const playRequestIdRef = useRef(0);
+  const lastEndedTrackIdRef = useRef(null);
 
   // Persistent refs to always provide latest values to native event listeners & background callbacks
   const queueRef = useRef(queue);
@@ -100,6 +101,7 @@ export function MusicProvider({ children }) {
   const repeatModeRef = useRef(repeatMode);
   const isShuffleRef = useRef(isShuffle);
   const autoplayEnabledRef = useRef(autoplayEnabled);
+  const recentSongsRef = useRef(recentSongs);
 
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
@@ -110,6 +112,7 @@ export function MusicProvider({ children }) {
   useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
   useEffect(() => { isShuffleRef.current = isShuffle; }, [isShuffle]);
   useEffect(() => { autoplayEnabledRef.current = autoplayEnabled; }, [autoplayEnabled]);
+  useEffect(() => { recentSongsRef.current = recentSongs; }, [recentSongs]);
 
   const playNextRef = useRef();
   const playPrevRef = useRef();
@@ -402,10 +405,14 @@ export function MusicProvider({ children }) {
 
     const onError = (e) => {
       console.warn('Audio playback error:', e);
-
-      // Playback recovery is handled inside playSong().
-      // Do NOT automatically advance here because it can race
-      // with stream re-resolution and cause multiple Next calls.
+      // If audio was actively playing and hit a fatal decode/network error, automatically skip to next track
+      if (isPlayingRef.current && !isAdvancingTrackRef.current) {
+        setTimeout(() => {
+          if (isPlayingRef.current && !isAdvancingTrackRef.current) {
+            handleSongEndedRef.current?.();
+          }
+        }, 500);
+      }
     };
 
     audio.addEventListener('timeupdate', onTimeUpdate);
@@ -694,6 +701,7 @@ export function MusicProvider({ children }) {
   const playSong = async (song, newQueue = null, options = {}) => {
     if (!song) return;
     const currentRequestId = ++playRequestIdRef.current;
+    lastEndedTrackIdRef.current = null;
 
     // Prioritize Studio 320k direct master audio streams over YouTube embeds
     let activeSong = song;
@@ -716,25 +724,76 @@ export function MusicProvider({ children }) {
       }
     }
 
-    // Update queue with deduplication (preserve search results immediately with 0 delay)
+    const isExplicitPlaylist = Boolean(options.isPlaylist || options.isQueueAdvance);
     let targetQueue = queueRef.current || [];
-    if (newQueue && Array.isArray(newQueue) && newQueue.length > 0) {
-      targetQueue = deduplicateQueue(newQueue);
-      setQueue(targetQueue);
-      queueRef.current = targetQueue;
-      if (!options.isFromSearch) {
-        setRadioMoodLabel('');
+
+    if (isExplicitPlaylist) {
+      // User is playing an explicit structured playlist, liked songs list, or advancing in existing queue
+      if (newQueue && Array.isArray(newQueue) && newQueue.length > 0) {
+        targetQueue = deduplicateQueue(newQueue);
+        setQueue(targetQueue);
+        queueRef.current = targetQueue;
+        if (!options.isFromSearch) {
+          setRadioMoodLabel('');
+        }
+      } else if (targetQueue.length === 0 || !targetQueue.some(s => s.id === activeSong.id)) {
+        targetQueue = deduplicateQueue([activeSong, ...targetQueue.filter(s => s.id !== activeSong.id)]);
+        setQueue(targetQueue);
+        queueRef.current = targetQueue;
       }
-    } else if (targetQueue.length === 0 || !targetQueue.some(s => s.id === activeSong.id)) {
-      targetQueue = deduplicateQueue([activeSong, ...targetQueue.filter(s => s.id !== activeSong.id)]);
+
+      const index = targetQueue.findIndex(s => s.id === activeSong.id);
+      const resolvedIndex = index !== -1 ? index : 0;
+      setQueueIndex(resolvedIndex);
+      queueIndexRef.current = resolvedIndex;
+    } else {
+      // User clicked an INDIVIDUAL song (from Search, Home, Discover, Artist page, etc.)
+      // 1. Instantly construct an immediate queue so playback starts with 0 latency (<100ms)
+      const immediateSlice = Array.isArray(newQueue)
+        ? newQueue.filter(s => s && s.id !== activeSong.id).slice(0, 5)
+        : [];
+      targetQueue = deduplicateQueue([activeSong, ...immediateSlice]);
       setQueue(targetQueue);
       queueRef.current = targetQueue;
+      setQueueIndex(0);
+      queueIndexRef.current = 0;
+
+      // 2. Concurrently fetch smart mood & genre queue blended with user's recent listening taste
+      const candidateSlice = Array.isArray(newQueue)
+        ? newQueue.filter(s => s && s.id !== activeSong.id).slice(0, 15)
+        : [];
+      const userHistorySlice = (recentSongsRef.current || recentSongs || []).slice(0, 20);
+
+      fetch('/api/radio/similar-queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          seedSong: activeSong,
+          candidateTracks: candidateSlice,
+          recentSongs: userHistorySlice
+        })
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (currentRequestId !== playRequestIdRef.current) return;
+          const smartSongs = data.songs || [];
+          if (smartSongs.length > 0) {
+            const combined = deduplicateQueue([activeSong, ...smartSongs.filter(s => s.id !== activeSong.id)]);
+            setQueue(combined);
+            queueRef.current = combined;
+            setQueueIndex(0);
+            queueIndexRef.current = 0;
+          }
+          if (data.moodLabel) {
+            setRadioMoodLabel(data.moodLabel);
+          }
+        })
+        .catch(err => {
+          console.warn('Smart mood queue fetch failed:', err);
+        });
     }
 
-    const index = targetQueue.findIndex(s => s.id === activeSong.id);
-    const resolvedIndex = index !== -1 ? index : 0;
-    setQueueIndex(resolvedIndex);
-    queueIndexRef.current = resolvedIndex;
+    const resolvedIndex = queueIndexRef.current;
 
     setCurrentTrack(activeSong);
     currentTrackRef.current = activeSong;
@@ -864,8 +923,14 @@ export function MusicProvider({ children }) {
           }
         }
 
-        setIsPlaying(false);
-        isPlayingRef.current = false;
+        console.warn('Track playback unrecoverable, auto-skipping to next song...');
+        if (currentRequestId === playRequestIdRef.current) {
+          setTimeout(() => {
+            if (currentRequestId === playRequestIdRef.current) {
+              playNextRef.current?.();
+            }
+          }, 600);
+        }
       }
     } else if (activeSong.source === 'youtube' || activeSong.youtubeId) {
       if (currentRequestId !== playRequestIdRef.current) return;
@@ -885,10 +950,11 @@ export function MusicProvider({ children }) {
     isPrefetchingRef.current = true;
 
     try {
+      const userHistory = (recentSongsRef.current || recentSongs || []).slice(0, 20);
       const res = await fetch('/api/radio/similar-queue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seedSong: seed })
+        body: JSON.stringify({ seedSong: seed, recentSongs: userHistory })
       });
       const data = await res.json();
       const songs = data.songs || [];
@@ -896,7 +962,10 @@ export function MusicProvider({ children }) {
       if (songs.length > 0) {
         setQueue(prevQueue => {
           const existingIds = new Set(prevQueue.map(s => s.id));
-          const toAdd = songs.filter(s => !existingIds.has(s.id) && s.id !== seed.id).slice(0, 8);
+          let toAdd = songs.filter(s => !existingIds.has(s.id) && s.id !== seed.id).slice(0, 8);
+          if (toAdd.length === 0) {
+            toAdd = songs.filter(s => s.id !== seed.id).slice(0, 6);
+          }
           if (toAdd.length === 0) return prevQueue;
           const updated = [...prevQueue, ...toAdd];
           queueRef.current = updated;
@@ -928,7 +997,7 @@ export function MusicProvider({ children }) {
           setIsPlaying(true);
           isPlayingRef.current = true;
         } else {
-          playSong(activeTrack, queueRef.current);
+          playSong(activeTrack, queueRef.current, { isPlaylist: true, isQueueAdvance: true });
         }
       }
     } else {
@@ -941,7 +1010,7 @@ export function MusicProvider({ children }) {
         const currentSrc = audio.src || '';
         const needsSetSrc = !currentSrc || currentSrc === window.location.href || currentSrc.endsWith('/');
         if (needsSetSrc) {
-          playSong(activeTrack, queueRef.current);
+          playSong(activeTrack, queueRef.current, { isPlaylist: true, isQueueAdvance: true });
         } else {
           audio.volume = 1.0;
           audio.play()
@@ -952,7 +1021,7 @@ export function MusicProvider({ children }) {
             .catch(e => {
               if (e?.name === 'AbortError' || e?.message?.includes('interrupted by a call to pause')) return;
               console.warn('Play error:', e);
-              playSong(activeTrack, queueRef.current);
+              playSong(activeTrack, queueRef.current, { isPlaylist: true, isQueueAdvance: true });
             });
         }
       }
@@ -1014,7 +1083,7 @@ export function MusicProvider({ children }) {
     }
 
     if (nextIndex < currentQ.length) {
-      playSong(currentQ[nextIndex], currentQ);
+      playSong(currentQ[nextIndex], currentQ, { isPlaylist: true, isQueueAdvance: true });
       // Trigger lookahead prefetch if queue is getting low
       if (currentQ.length - nextIndex <= 3) {
         prefetchAutoplayTracks(currentQ[nextIndex]);
@@ -1022,37 +1091,59 @@ export function MusicProvider({ children }) {
     } else if (autoplayEnabledRef.current && currentT) {
       // Reached end of current queue: fetch more songs matching the current track's mood/genre
       try {
+        const userHistory = (recentSongsRef.current || recentSongs || []).slice(0, 20);
         const res = await fetch('/api/radio/similar-queue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ seedSong: currentT })
+          body: JSON.stringify({ seedSong: currentT, recentSongs: userHistory })
         });
         const data = await res.json();
         const items = data.songs || [];
         const existingIds = new Set(currentQ.map(s => s.id));
-        const newMatching = items.filter(s => !existingIds.has(s.id) && s.id !== currentT.id);
+        let newMatching = items.filter(s => !existingIds.has(s.id) && s.id !== currentT.id);
+
+        // If all items already exist in recent queue, relax duplicate check
+        if (newMatching.length === 0 && items.length > 0) {
+          newMatching = items.filter(s => s.id !== currentT.id).slice(0, 10);
+        }
 
         if (newMatching.length > 0) {
           const combinedQueue = deduplicateQueue([...currentQ, ...newMatching]);
           setQueue(combinedQueue);
           queueRef.current = combinedQueue;
           if (data.moodLabel) setRadioMoodLabel(data.moodLabel);
-          playSong(newMatching[0], combinedQueue);
+          playSong(newMatching[0], combinedQueue, { isPlaylist: true, isQueueAdvance: true });
+          return;
+        }
+
+        // Fallback: fetch trending songs so autoplay flow NEVER stops
+        const trendRes = await fetch('/api/recommend?limit=15');
+        const trendData = await trendRes.json();
+        const trendSongs = trendData.songs || [];
+        const freshTrending = trendSongs.filter(s => s.id !== currentT.id && !existingIds.has(s.id));
+        const toAdd = freshTrending.length > 0 ? freshTrending : trendSongs.filter(s => s.id !== currentT.id);
+
+        if (toAdd.length > 0) {
+          const combinedQueue = deduplicateQueue([...currentQ, ...toAdd]);
+          setQueue(combinedQueue);
+          queueRef.current = combinedQueue;
+          playSong(toAdd[0], combinedQueue, { isPlaylist: true, isQueueAdvance: true });
           return;
         }
       } catch (err) {
         console.warn('Autoplay fetch failed:', err);
       }
 
-      if (currentRepeat === 'all') {
-        playSong(currentQ[0], currentQ);
+      // If all network recommendation calls failed, loop back to beginning of queue so music never dies
+      if (currentQ.length > 0) {
+        playSong(currentQ[0], currentQ, { isPlaylist: true, isQueueAdvance: true });
       } else {
         setIsPlaying(false);
         isPlayingRef.current = false;
       }
     } else {
-      if (currentRepeat === 'all') {
-        playSong(currentQ[0], currentQ);
+      if (currentRepeat === 'all' || currentQ.length > 0) {
+        playSong(currentQ[0], currentQ, { isPlaylist: true, isQueueAdvance: true });
       } else {
         setIsPlaying(false);
         isPlayingRef.current = false;
@@ -1072,10 +1163,10 @@ export function MusicProvider({ children }) {
 
     let prevIndex = currentIndex - 1;
     if (prevIndex >= 0) {
-      playSong(currentQ[prevIndex], currentQ);
+      playSong(currentQ[prevIndex], currentQ, { isPlaylist: true, isQueueAdvance: true });
     } else {
       if (repeatModeRef.current === 'all') {
-        playSong(currentQ[currentQ.length - 1], currentQ);
+        playSong(currentQ[currentQ.length - 1], currentQ, { isPlaylist: true, isQueueAdvance: true });
       } else {
         seekTo(0);
       }
@@ -1083,14 +1174,16 @@ export function MusicProvider({ children }) {
   };
 
   const handleSongEnded = () => {
-    if (isAdvancingTrackRef.current) return; // Prevent double triggers
-    isAdvancingTrackRef.current = true;
     const activeTrack = currentTrackRef.current;
+    if (!activeTrack || isAdvancingTrackRef.current) return;
+    if (lastEndedTrackIdRef.current === activeTrack.id) return;
+    lastEndedTrackIdRef.current = activeTrack.id;
+    isAdvancingTrackRef.current = true;
     const currentPos = currentTimeRef.current;
     const currentDur = durationRef.current;
     const currentRepeat = repeatModeRef.current;
 
-    if (activeTrack && recordedTrackIdRef.current !== activeTrack.id) {
+    if (recordedTrackIdRef.current !== activeTrack.id) {
       if (currentPos >= 45 || accumulatedListenSecondsRef.current >= 45 || (currentDur > 0 && currentPos >= currentDur * 0.85)) {
         recordedTrackIdRef.current = activeTrack.id;
         recordRecentSong(activeTrack);
@@ -1111,8 +1204,7 @@ export function MusicProvider({ children }) {
       playNext();
     }
     // Reset advancing flag after short delay to allow next track load
-    setTimeout(() => { isAdvancingTrackRef.current = false; }, 500);
-
+    setTimeout(() => { isAdvancingTrackRef.current = false; }, 800);
   };
 
   // Synchronize function refs on every render so external callers never hold stale closures
