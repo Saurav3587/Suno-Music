@@ -362,18 +362,26 @@ app.get('/api/yt/audio', async (req, res) => {
 
 // Download proxy: streams track audio directly to client with attachment Content-Disposition
 app.get('/api/download', async (req, res) => {
-  const { url, title, artist, youtubeId } = req.query;
+  let { url, title, artist, youtubeId } = req.query;
 
   let targetUrl = url;
-  if (!targetUrl && youtubeId) {
-    try {
-      targetUrl = await getYouTubeAudioStream(youtubeId);
-    } catch (e) {
-      console.warn('Failed to resolve YouTube audio for download:', e.message);
+  if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.startsWith('http')) {
+    if (!youtubeId && targetUrl && targetUrl.includes('id=')) {
+      try {
+        const u = new URL(targetUrl, 'http://localhost');
+        youtubeId = u.searchParams.get('id') || youtubeId;
+      } catch (_) {}
+    }
+    if (youtubeId) {
+      try {
+        targetUrl = await getYouTubeAudioStream(youtubeId);
+      } catch (e) {
+        console.warn('Failed to resolve YouTube audio for download:', e.message);
+      }
     }
   }
 
-  if (!targetUrl || typeof targetUrl !== 'string') {
+  if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.startsWith('http')) {
     return res.status(400).json({ error: 'Valid stream URL or youtubeId is required for download' });
   }
 
@@ -384,40 +392,63 @@ app.get('/api/download', async (req, res) => {
       .replace(/[\/\\?%*:|"<>]/g, '_')
       .trim() + '.mp3';
 
-    const parsedUrl = new URL(targetUrl);
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      'accept': '*/*'
+    const followAndStream = (currentUrl, redirectCount = 0) => {
+      if (redirectCount > 5) {
+        if (!res.headersSent) res.status(502).json({ error: 'Too many redirects from audio source' });
+        return;
+      }
+
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(currentUrl);
+      } catch (err) {
+        if (!res.headersSent) res.status(400).json({ error: 'Invalid audio URL' });
+        return;
+      }
+
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'accept': '*/*'
+      };
+
+      if (parsedUrl.hostname.includes('youtube') || parsedUrl.hostname.includes('googlevideo')) {
+        headers['origin'] = 'https://www.youtube.com';
+        headers['referer'] = 'https://www.youtube.com';
+      }
+
+      const client = parsedUrl.protocol === 'http:' ? http : https;
+      const proxyReq = client.get(parsedUrl, { headers }, (upstreamRes) => {
+        // Follow 3xx redirects
+        if ([301, 302, 303, 307, 308].includes(upstreamRes.statusCode) && upstreamRes.headers.location) {
+          const redirectTarget = new URL(upstreamRes.headers.location, currentUrl).href;
+          upstreamRes.resume();
+          return followAndStream(redirectTarget, redirectCount + 1);
+        }
+
+        res.status(upstreamRes.statusCode || 200);
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"; filename*=UTF-8''${encodeURIComponent(cleanFilename)}`);
+        if (upstreamRes.headers['content-length']) {
+          res.setHeader('Content-Length', upstreamRes.headers['content-length']);
+        }
+        upstreamRes.pipe(res);
+      });
+
+      proxyReq.on('error', (err) => {
+        console.error('Download stream error:', err.message);
+        if (!res.headersSent) {
+          res.status(502).json({ error: 'Download stream error', message: err.message });
+        }
+      });
+
+      req.on('close', () => {
+        if (!res.writableEnded) {
+          proxyReq.destroy();
+        }
+      });
     };
 
-    if (parsedUrl.hostname.includes('youtube') || parsedUrl.hostname.includes('googlevideo')) {
-      headers['origin'] = 'https://www.youtube.com';
-      headers['referer'] = 'https://www.youtube.com';
-    }
-
-    const client = parsedUrl.protocol === 'http:' ? http : https;
-    const proxyReq = client.get(parsedUrl, { headers }, (upstreamRes) => {
-      res.status(upstreamRes.statusCode || 200);
-      res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"; filename*=UTF-8''${encodeURIComponent(cleanFilename)}`);
-      if (upstreamRes.headers['content-length']) {
-        res.setHeader('Content-Length', upstreamRes.headers['content-length']);
-      }
-      upstreamRes.pipe(res);
-    });
-
-    proxyReq.on('error', (err) => {
-      console.error('Download stream error:', err.message);
-      if (!res.headersSent) {
-        res.status(502).json({ error: 'Download stream error', message: err.message });
-      }
-    });
-
-    req.on('close', () => {
-      if (!res.writableEnded) {
-        proxyReq.destroy();
-      }
-    });
+    followAndStream(targetUrl);
   } catch (err) {
     console.error('Download endpoint error:', err.message);
     if (!res.headersSent) {

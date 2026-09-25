@@ -68,7 +68,12 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
     toggleAutoplay,
     queue,
     queueIndex,
-    radioMoodLabel
+    radioMoodLabel,
+    sleepTimerRemaining,
+    sleepTimerMode,
+    selectedTimerOption,
+    setTimerPreset,
+    getBackendBase
   } = useMusic();
 
   const [showLyrics, setShowLyrics] = useState(false);
@@ -103,73 +108,14 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
     fetch('/api/ai/status').then(r => r.json()).then(d => setAiAvailable(d.available)).catch(() => {});
   }, []);
 
-  // Sleep Timer state
+  // Sleep Timer modal visibility (state, timers, and background persistence managed globally in MusicContext)
   const [showTimerModal, setShowTimerModal] = useState(false);
-  const [sleepTimerRemaining, setSleepTimerRemaining] = useState(null); // in seconds
-  const [sleepTimerMode, setSleepTimerMode] = useState(null); // 'minutes' | 'end-of-song' | null
-  const [selectedTimerOption, setSelectedTimerOption] = useState(null);
-  const initialTimerTrackIdRef = useRef(null);
 
-  // Sleep Timer interval countdown
-  useEffect(() => {
-    if (sleepTimerMode !== 'minutes' || sleepTimerRemaining === null) return;
-    if (sleepTimerRemaining <= 0) {
-      if (isPlaying) togglePlay();
-      setSleepTimerMode(null);
-      setSelectedTimerOption(null);
-      setSleepTimerRemaining(null);
-      return;
+  const handleSelectTimerPreset = (option) => {
+    if (typeof setTimerPreset === 'function') {
+      setTimerPreset(option);
     }
-
-    const timerId = setInterval(() => {
-      setSleepTimerRemaining(prev => {
-        if (prev === null) return null;
-        if (prev <= 1) {
-          if (isPlaying) togglePlay();
-          setSleepTimerMode(null);
-          setSelectedTimerOption(null);
-          return null;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timerId);
-  }, [sleepTimerMode, sleepTimerRemaining, isPlaying, togglePlay]);
-
-  // End-of-song sleep timer watcher
-  useEffect(() => {
-    if (sleepTimerMode !== 'end-of-song') return;
-    if (!initialTimerTrackIdRef.current) return;
-
-    if (currentTrack?.id && currentTrack.id !== initialTimerTrackIdRef.current) {
-      if (isPlaying) togglePlay();
-      setSleepTimerMode(null);
-      setSelectedTimerOption(null);
-      initialTimerTrackIdRef.current = null;
-    }
-  }, [currentTrack?.id, sleepTimerMode, isPlaying, togglePlay]);
-
-  const setTimerPreset = (option) => {
-    if (option === 'end-of-song') {
-      setSleepTimerMode('end-of-song');
-      setSelectedTimerOption('end-of-song');
-      initialTimerTrackIdRef.current = currentTrack?.id;
-      setSleepTimerRemaining(null);
-      setShowTimerModal(false);
-    } else if (option === 'off') {
-      setSleepTimerMode(null);
-      setSelectedTimerOption(null);
-      setSleepTimerRemaining(null);
-      initialTimerTrackIdRef.current = null;
-      setShowTimerModal(false);
-    } else {
-      const minutes = Number(option);
-      setSelectedTimerOption(minutes);
-      setSleepTimerRemaining(minutes * 60);
-      setSleepTimerMode('minutes');
-      setShowTimerModal(false);
-    }
+    setShowTimerModal(false);
   };
 
   // Download state & handler
@@ -189,14 +135,26 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
       const title = currentTrack.title || 'Track';
       const artist = currentTrack.artist || 'Suno Music';
 
-      const downloadUrl = `/api/download?url=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&youtubeId=${encodeURIComponent(youtubeId)}`;
+      const base = typeof getBackendBase === 'function' ? getBackendBase() : '';
+      const downloadPath = `/api/download?url=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&youtubeId=${encodeURIComponent(youtubeId)}`;
+      const fullDownloadUrl = base ? `${base}${downloadPath}` : downloadPath;
 
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.setAttribute('download', `${title} - ${artist}.mp3`);
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const isNative = typeof window !== 'undefined' && (
+        window.location.protocol === 'capacitor:' ||
+        (window.location.hostname === 'localhost' && window.location.port !== '5173')
+      );
+
+      if (isNative) {
+        // Native Android Capacitor: trigger system browser/download manager to save the MP3 directly
+        window.open(fullDownloadUrl, '_system');
+      } else {
+        const a = document.createElement('a');
+        a.href = fullDownloadUrl;
+        a.setAttribute('download', `${title} - ${artist}.mp3`);
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
 
       confetti({
         particleCount: 26,
@@ -1015,7 +973,7 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
                 <button
                   key={opt.label}
                   className={`timer-option-btn ${isSelected ? 'selected' : ''} ${opt.isOff ? 'off-opt' : ''}`}
-                  onClick={() => setTimerPreset(opt.value)}
+                  onClick={() => handleSelectTimerPreset(opt.value)}
                 >
                   <span>{opt.label}</span>
                   {isSelected && <Check size={16} className="timer-check-icon" />}

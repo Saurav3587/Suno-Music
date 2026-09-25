@@ -3,6 +3,16 @@ import { useUser } from './UserContext';
 
 const MusicContext = createContext();
 
+export const getBackendBase = () => {
+  if (typeof window !== 'undefined') {
+    const isNative = window.location.protocol === 'capacitor:' || (window.location.hostname === 'localhost' && window.location.port !== '5173');
+    if (isNative) {
+      return localStorage.getItem('suno_custom_backend') || 'https://suno-music-x6c4.onrender.com';
+    }
+  }
+  return '';
+};
+
 export function MusicProvider({ children }) {
   const { currentUser, authToken } = useUser();
   const audioRef = useRef(new Audio());
@@ -80,6 +90,12 @@ export function MusicProvider({ children }) {
   const closePlaylist = () => {
     setActivePlaylistModal(null);
   };
+
+  // Sleep Timer state (persisted globally across player minimize, page transitions, and background)
+  const [sleepTimerRemaining, setSleepTimerRemaining] = useState(null); // in seconds
+  const [sleepTimerMode, setSleepTimerMode] = useState(null); // 'minutes' | 'end-of-song' | null
+  const [selectedTimerOption, setSelectedTimerOption] = useState(null);
+  const initialTimerTrackIdRef = useRef(null);
 
   const isAdvancingTrackRef = useRef(false);
   const isPrefetchingRef = useRef(false);
@@ -702,16 +718,6 @@ export function MusicProvider({ children }) {
     return track;
   };
 
-  const getBackendBase = () => {
-    if (typeof window !== 'undefined') {
-      const isNative = window.location.protocol === 'capacitor:' || (window.location.hostname === 'localhost' && window.location.port !== '5173');
-      if (isNative) {
-        return localStorage.getItem('suno_custom_backend') || 'https://suno-music-x6c4.onrender.com';
-      }
-    }
-    return '';
-  };
-
   const getProxiedAudioUrl = (streamUrl) => {
     if (!streamUrl) return '';
     const base = getBackendBase();
@@ -1109,6 +1115,77 @@ export function MusicProvider({ children }) {
     }
   };
 
+  const pauseSong = useCallback(() => {
+    const activeTrack = currentTrackRef.current;
+    if (!activeTrack) return;
+    if (activeTrack.source === 'youtube' && !activeTrack.streamUrl) {
+      ytPlayerRef.current?.pauseVideo();
+    } else if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    setIsPlaying(false);
+    isPlayingRef.current = false;
+  }, []);
+
+  const setTimerPreset = useCallback((option) => {
+    if (option === 'end-of-song') {
+      setSleepTimerMode('end-of-song');
+      setSelectedTimerOption('end-of-song');
+      initialTimerTrackIdRef.current = currentTrackRef.current?.id;
+      setSleepTimerRemaining(null);
+    } else if (option === 'off') {
+      setSleepTimerMode(null);
+      setSelectedTimerOption(null);
+      setSleepTimerRemaining(null);
+      initialTimerTrackIdRef.current = null;
+    } else {
+      const minutes = Number(option);
+      setSelectedTimerOption(minutes);
+      setSleepTimerRemaining(minutes * 60);
+      setSleepTimerMode('minutes');
+    }
+  }, []);
+
+  // Sleep Timer countdown interval (keeps running even when player is minimized/closed)
+  useEffect(() => {
+    if (sleepTimerMode !== 'minutes' || sleepTimerRemaining === null) return;
+    if (sleepTimerRemaining <= 0) {
+      pauseSong();
+      setSleepTimerMode(null);
+      setSelectedTimerOption(null);
+      setSleepTimerRemaining(null);
+      return;
+    }
+
+    const timerId = setInterval(() => {
+      setSleepTimerRemaining(prev => {
+        if (prev === null) return null;
+        if (prev <= 1) {
+          pauseSong();
+          setSleepTimerMode(null);
+          setSelectedTimerOption(null);
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timerId);
+  }, [sleepTimerMode, sleepTimerRemaining, pauseSong]);
+
+  // End-of-song watcher for sleep timer
+  useEffect(() => {
+    if (sleepTimerMode !== 'end-of-song') return;
+    if (!initialTimerTrackIdRef.current) return;
+
+    if (currentTrack?.id && currentTrack.id !== initialTimerTrackIdRef.current) {
+      pauseSong();
+      setSleepTimerMode(null);
+      setSelectedTimerOption(null);
+      initialTimerTrackIdRef.current = null;
+    }
+  }, [currentTrack?.id, sleepTimerMode, pauseSong]);
+
   const seekTo = (seconds) => {
     setCurrentTime(seconds);
     currentTimeRef.current = seconds;
@@ -1415,7 +1492,13 @@ export function MusicProvider({ children }) {
       radioMoodLabel,
       activePlaylistModal,
       openPlaylist,
-      closePlaylist
+      closePlaylist,
+      pauseSong,
+      sleepTimerRemaining,
+      sleepTimerMode,
+      selectedTimerOption,
+      setTimerPreset,
+      getBackendBase
     }}>
       {children}
     </MusicContext.Provider>
