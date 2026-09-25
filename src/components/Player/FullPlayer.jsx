@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -21,10 +21,13 @@ import {
   Download,
   Loader2,
   Check,
-  Moon
+  Moon,
+  SlidersHorizontal,
+  Mic2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useMusic } from '../../context/MusicContext';
+import EqualizerModal from './EqualizerModal';
 
 const SpotifyIcon = ({ size = 15, color = '#1db954' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
@@ -73,12 +76,19 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
     sleepTimerMode,
     selectedTimerOption,
     setTimerPreset,
-    getBackendBase
+    getBackendBase,
+    eqEnabled
   } = useMusic();
 
   const [showLyrics, setShowLyrics] = useState(false);
   const [lyrics, setLyrics] = useState('');
+  const [syncedLines, setSyncedLines] = useState([]);
+  const [isSyncedLyrics, setIsSyncedLyrics] = useState(false);
+  const [lyricsViewMode, setLyricsViewMode] = useState('synced'); // 'synced' | 'plain'
   const [loadingLyrics, setLoadingLyrics] = useState(false);
+  const [showEqModal, setShowEqModal] = useState(false);
+  const lyricsContainerRef = useRef(null);
+  const activeLineRef = useRef(null);
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekValue, setSeekValue] = useState(0);
 
@@ -316,20 +326,62 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
     return `${mins}:${remainingSecs < 10 ? '0' : ''}${remainingSecs}`;
   };
 
-  // Fetch lyrics when requested
+  // Reset lyrics when track changes
+  useEffect(() => {
+    setLyrics('');
+    setSyncedLines([]);
+    setIsSyncedLyrics(false);
+  }, [currentTrack?.id]);
+
+  // Compute active synced lyric line based on current playback time
+  const activeLineIndex = useMemo(() => {
+    if (!isSyncedLyrics || !syncedLines.length) return -1;
+    for (let i = syncedLines.length - 1; i >= 0; i--) {
+      if (currentTime >= syncedLines[i].time - 0.25) {
+        return i;
+      }
+    }
+    return 0;
+  }, [isSyncedLyrics, syncedLines, currentTime]);
+
+  // Auto-scroll active lyric into center view
+  useEffect(() => {
+    if (showLyrics && isSyncedLyrics && lyricsViewMode === 'synced' && activeLineIndex >= 0 && activeLineRef.current) {
+      activeLineRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    }
+  }, [activeLineIndex, showLyrics, isSyncedLyrics, lyricsViewMode]);
+
+  // Fetch lyrics when requested (Supports Synced Karaoke LRCLIB + JioSaavn fallback)
   const handleToggleLyrics = async () => {
-    if (!showLyrics && !lyrics) {
+    if (!showLyrics && !lyrics && !syncedLines.length) {
       setLoadingLyrics(true);
       try {
-        const res = await fetch(`/api/lyrics?id=${currentTrack.id}`);
+        const titleParam = encodeURIComponent(currentTrack?.title || '');
+        const artistParam = encodeURIComponent(currentTrack?.artist || '');
+        const durParam = currentTrack?.duration ? `&duration=${Math.round(currentTrack.duration)}` : '';
+        const res = await fetch(`/api/lyrics?id=${currentTrack?.id}&title=${titleParam}&artist=${artistParam}${durParam}`);
         const data = await res.json();
-        if (data.lyrics) {
+
+        if (data.isSynced && Array.isArray(data.lines) && data.lines.length > 0) {
+          setSyncedLines(data.lines);
+          setIsSyncedLyrics(true);
+          setLyrics(data.lyrics ? data.lyrics.replace(/<br\s*[\/]?>/gi, '\n') : '');
+        } else if (data.lyrics) {
           setLyrics(data.lyrics.replace(/<br\s*[\/]?>/gi, '\n'));
+          setSyncedLines([]);
+          setIsSyncedLyrics(false);
         } else {
           setLyrics('No lyrics found for this song. Enjoy the rhythm!');
+          setSyncedLines([]);
+          setIsSyncedLyrics(false);
         }
       } catch {
         setLyrics('Unable to load lyrics at this moment.');
+        setSyncedLines([]);
+        setIsSyncedLyrics(false);
       } finally {
         setLoadingLyrics(false);
       }
@@ -391,6 +443,15 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
         </div>
 
         <div className="player-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Equalizer & Audio FX button */}
+          <button
+            className={`action-btn player-eq-btn ${eqEnabled ? 'eq-active' : ''}`}
+            onClick={() => setShowEqModal(true)}
+            title="Audio Equalizer & FX"
+          >
+            <SlidersHorizontal size={20} />
+          </button>
+
           {/* Sleep Timer badge / button */}
           <button
             className={`action-btn player-timer-btn ${sleepTimerMode ? 'timer-active' : ''}`}
@@ -422,34 +483,74 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
         </div>
       </div>
 
-      {/* Center: Album Art Card or Lyrics */}
+      {/* Center: Album Art Card or Synced Karaoke Lyrics */}
       {showLyrics ? (
-        <div style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          padding: '16px',
-          background: 'rgba(0,0,0,0.5)',
-          borderRadius: '20px',
-          backdropFilter: 'blur(20px)',
-          margin: '6px 0',
-          position: 'relative',
-          zIndex: 2,
-          textAlign: 'center'
-        }}>
-          <h3 style={{ fontSize: '0.92rem', color: '#ff85a2', marginBottom: '12px' }}>Lyrics</h3>
+        <div className="player-lyrics-card">
+          {/* Lyrics Header & View Mode Switcher */}
+          <div className="player-lyrics-header">
+            <div className="lyrics-badge">
+              <Mic2 size={13} color="#f5a65b" />
+              <span>{isSyncedLyrics ? 'Live Karaoke Lyrics' : 'Lyrics'}</span>
+            </div>
+
+            {isSyncedLyrics && (
+              <div className="lyrics-mode-toggle">
+                <button
+                  type="button"
+                  className={`lyrics-mode-btn ${lyricsViewMode === 'synced' ? 'active' : ''}`}
+                  onClick={() => setLyricsViewMode('synced')}
+                >
+                  Karaoke
+                </button>
+                <button
+                  type="button"
+                  className={`lyrics-mode-btn ${lyricsViewMode === 'plain' ? 'active' : ''}`}
+                  onClick={() => setLyricsViewMode('plain')}
+                >
+                  Plain
+                </button>
+              </div>
+            )}
+          </div>
+
           {loadingLyrics ? (
-            <p style={{ color: 'rgba(255,255,255,0.6)' }}>Finding lyrics...</p>
+            <div className="lyrics-loading-state">
+              <div className="equalizer" style={{ justifyContent: 'center', marginBottom: '8px' }}>
+                <div className="eq-bar" />
+                <div className="eq-bar" />
+                <div className="eq-bar" />
+              </div>
+              <p>Finding synchronized lyrics...</p>
+            </div>
+          ) : isSyncedLyrics && lyricsViewMode === 'synced' ? (
+            <div
+              ref={lyricsContainerRef}
+              className="karaoke-scroll-container"
+            >
+              {syncedLines.map((line, idx) => {
+                const isActive = activeLineIndex === idx;
+                const isPast = activeLineIndex > idx;
+                return (
+                  <div
+                    key={`${line.time}-${idx}`}
+                    ref={isActive ? activeLineRef : null}
+                    className={`karaoke-line ${isActive ? 'active' : ''} ${isPast ? 'past' : ''}`}
+                    onClick={() => seekTo(line.time)}
+                    role="button"
+                    tabIndex={0}
+                    title="Click to jump to this lyric"
+                  >
+                    <span className="karaoke-text">{line.text || '♪'}</span>
+                  </div>
+                );
+              })}
+            </div>
           ) : (
-            <p style={{
-              whiteSpace: 'pre-line',
-              lineHeight: '1.8',
-              fontSize: '0.98rem',
-              color: '#ffffff',
-              fontFamily: 'var(--font-display)'
-            }}>
-              {lyrics}
-            </p>
+            <div className="plain-lyrics-container">
+              <p className="plain-lyrics-text">
+                {lyrics}
+              </p>
+            </div>
           )}
         </div>
       ) : (
@@ -1068,6 +1169,11 @@ export default function FullPlayer({ onAddToPlaylist, onOpenNote }) {
           </div>
         </div>
       </div>
+    )}
+
+    {/* 5-Band Studio Equalizer & Audio FX Modal */}
+    {showEqModal && (
+      <EqualizerModal onClose={() => setShowEqModal(false)} />
     )}
   </div>
 );

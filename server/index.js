@@ -291,6 +291,8 @@ app.get('/api/audio', async (req, res) => {
       const value = upstream.headers.get(header);
       if (value) res.setHeader(header, value);
     }
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Cache-Control', 'public, max-age=3600');
 
     if (upstream.body) {
@@ -336,6 +338,8 @@ app.get('/api/yt/audio', async (req, res) => {
           res.setHeader(k, v);
         }
       }
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Headers', '*');
       res.setHeader('Cache-Control', 'public, max-age=3600');
       upstreamRes.pipe(res);
     });
@@ -471,23 +475,83 @@ app.get('/api/yt/search', async (req, res) => {
   }
 });
 
-// Get song lyrics
-app.get('/api/lyrics', async (req, res) => {
-  const songId = req.query.id;
-  if (!songId) return res.status(400).json({ error: 'Missing song ID' });
+// Helper to parse LRC timestamped lyrics into array of { time: seconds, text: string }
+function parseLrc(lrcText) {
+  if (!lrcText) return [];
+  const lines = lrcText.split('\n');
+  const result = [];
+  const timeRegex = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/g;
 
-  try {
-    const url = `https://www.jiosaavn.com/api.php?__call=lyrics.getLyrics&lyrics_id=${songId}&_format=json&_marker=0&api_version=4&ctx=web6dot0`;
-    const response = await fetch(url);
-    const data = await response.json();
-    res.json({
-      lyrics: data.lyrics || null,
-      snippet: data.snippet || null,
-      copyright: data.copyright_text || ''
-    });
-  } catch (err) {
-    res.json({ lyrics: null });
+  for (const line of lines) {
+    const matches = [...line.matchAll(timeRegex)];
+    if (matches.length > 0) {
+      const text = line.replace(timeRegex, '').trim();
+      for (const m of matches) {
+        const mins = parseInt(m[1], 10);
+        const secs = parseInt(m[2], 10);
+        const ms = m[3] ? parseInt(m[3].padEnd(3, '0').slice(0, 3), 10) : 0;
+        const totalSeconds = mins * 60 + secs + ms / 1000;
+        result.push({ time: totalSeconds, text });
+      }
+    }
   }
+  return result.sort((a, b) => a.time - b.time);
+}
+
+// Get song lyrics (Supports Synced Karaoke LRC from LRCLIB + JioSaavn Fallback)
+app.get('/api/lyrics', async (req, res) => {
+  const { id: songId, title, artist, duration } = req.query;
+
+  // 1. Try LRCLIB for real-time Synced Karaoke Lyrics
+  if (title) {
+    try {
+      const cleanTitle = title.replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
+      const cleanArtist = (artist || '').split(/[,&]/)[0].replace(/\([^)]*\)|\[[^\]]*\]/g, '').trim();
+      let lrcUrl = `https://lrclib.net/api/get?track_name=${encodeURIComponent(cleanTitle)}`;
+      if (cleanArtist) lrcUrl += `&artist_name=${encodeURIComponent(cleanArtist)}`;
+      if (duration && !isNaN(duration)) lrcUrl += `&duration=${Math.round(duration)}`;
+
+      const lrclibRes = await fetch(lrcUrl, {
+        headers: { 'User-Agent': 'SunoMusic/1.0.5 (https://github.com/Saurav3587/Suno-Music)' }
+      });
+      if (lrclibRes.ok) {
+        const lrcData = await lrclibRes.json();
+        if (lrcData && (lrcData.syncedLyrics || lrcData.plainLyrics)) {
+          const parsedLines = lrcData.syncedLyrics ? parseLrc(lrcData.syncedLyrics) : [];
+          return res.json({
+            lyrics: lrcData.plainLyrics || lrcData.syncedLyrics,
+            syncedLyrics: lrcData.syncedLyrics || null,
+            lines: parsedLines,
+            isSynced: parsedLines.length > 0,
+            source: 'lrclib'
+          });
+        }
+      }
+    } catch (e) {
+      // Continue to JioSaavn fallback
+    }
+  }
+
+  // 2. JioSaavn Fallback
+  if (songId) {
+    try {
+      const url = `https://www.jiosaavn.com/api.php?__call=lyrics.getLyrics&lyrics_id=${songId}&_format=json&_marker=0&api_version=4&ctx=web6dot0`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data && data.lyrics) {
+        return res.json({
+          lyrics: data.lyrics,
+          snippet: data.snippet || null,
+          copyright: data.copyright_text || '',
+          lines: [],
+          isSynced: false,
+          source: 'jiosaavn'
+        });
+      }
+    } catch (err) {}
+  }
+
+  res.json({ lyrics: null, syncedLyrics: null, lines: [], isSynced: false });
 });
 
 // Auto-Playlist Generator based on recent listening history & matching songs

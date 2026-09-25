@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useUser } from './UserContext';
 
 const MusicContext = createContext();
@@ -13,9 +13,28 @@ export const getBackendBase = () => {
   return '';
 };
 
+export const EQ_FREQUENCIES = [60, 230, 910, 3600, 14000];
+
+export const EQ_PRESETS = {
+  'Flat': { label: 'Flat', bands: [0, 0, 0, 0, 0], bassBoost: 0 },
+  'Bass Boost': { label: 'Bass Boost', bands: [7, 5, 2, 0, -1], bassBoost: 75 },
+  'Pop': { label: 'Pop', bands: [-1, 2, 5, 2, -2], bassBoost: 25 },
+  'Rock': { label: 'Rock', bands: [5, 3, -1, 3, 5], bassBoost: 40 },
+  'Acoustic': { label: 'Acoustic', bands: [3, 2, 1, 3, 2], bassBoost: 15 },
+  'Electronic': { label: 'Electronic', bands: [6, 4, 0, 2, 5], bassBoost: 65 },
+  'Vocal': { label: 'Vocal', bands: [-2, 0, 4, 3, 1], bassBoost: 10 },
+  'Classical': { label: 'Classical', bands: [4, 2, -1, 2, 4], bassBoost: 15 }
+};
+
 export function MusicProvider({ children }) {
   const { currentUser, authToken } = useUser();
-  const audioRef = useRef(new Audio());
+  const audioRef = useRef(null);
+  if (!audioRef.current && typeof window !== 'undefined') {
+    const a = new Audio();
+    a.crossOrigin = 'anonymous';
+    a.preload = 'auto';
+    audioRef.current = a;
+  }
   const ytPlayerRef = useRef(null);
 
   const [currentTrack, setCurrentTrack] = useState(() => {
@@ -47,6 +66,53 @@ export function MusicProvider({ children }) {
   const [isShuffle, setIsShuffle] = useState(false);
   const [repeatMode, setRepeatMode] = useState('off'); // 'off' | 'all' | 'one'
   const [isFullPlayerOpen, setIsFullPlayerOpen] = useState(false);
+
+  // ── Equalizer & Audiophile Web Audio State ──
+  const [eqEnabled, setEqEnabled] = useState(() => {
+    try {
+      const saved = localStorage.getItem('suno_eq_enabled');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const [eqPreset, setEqPresetState] = useState(() => {
+    try {
+      return localStorage.getItem('suno_eq_preset') || 'Bass Boost';
+    } catch {
+      return 'Bass Boost';
+    }
+  });
+
+  const [eqBands, setEqBandsState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('suno_eq_bands');
+      if (saved) return JSON.parse(saved);
+      return EQ_PRESETS['Bass Boost'].bands;
+    } catch {
+      return [7, 5, 2, 0, -1];
+    }
+  });
+
+  const [bassBoost, setBassBoostState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('suno_bass_boost');
+      return saved !== null ? parseInt(saved, 10) : 50;
+    } catch {
+      return 50;
+    }
+  });
+
+  // ── Crossfade Playback State (0s, 2s, 4s, 6s, 8s, 12s) ──
+  const [crossfadeDuration, setCrossfadeDurationState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('suno_crossfade_duration');
+      return saved !== null ? parseInt(saved, 10) : 4;
+    } catch {
+      return 4;
+    }
+  });
 
   // Active playlist queue (persisted across app restarts)
   const [queue, setQueue] = useState(() => {
@@ -137,6 +203,216 @@ export function MusicProvider({ children }) {
   const handleSongEndedRef = useRef();
   const seekToRef = useRef();
   const togglePlayRef = useRef();
+
+  // Web Audio Graph Refs for 5-Band EQ & Bass Boost
+  const audioCtxRef = useRef(null);
+  const sourceNodeRef = useRef(null);
+  const filterNodesRef = useRef([]);
+  const bassBoostNodeRef = useRef(null);
+  const masterGainNodeRef = useRef(null);
+  const crossfadeTriggeredRef = useRef(false);
+
+  const eqBandsRef = useRef(eqBands);
+  const bassBoostRef = useRef(bassBoost);
+  const eqEnabledRef = useRef(eqEnabled);
+  const crossfadeDurationRef = useRef(crossfadeDuration);
+
+  useEffect(() => { eqBandsRef.current = eqBands; }, [eqBands]);
+  useEffect(() => { bassBoostRef.current = bassBoost; }, [bassBoost]);
+  useEffect(() => { eqEnabledRef.current = eqEnabled; }, [eqEnabled]);
+  useEffect(() => { crossfadeDurationRef.current = crossfadeDuration; }, [crossfadeDuration]);
+
+  // Initialize Web Audio Graph once user interacts with playback or EQ
+  const initAudioGraph = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+
+      const audio = audioRef.current;
+      if (!audio) return;
+
+      if (!audioCtxRef.current) {
+        const ctx = new AudioCtx();
+        audioCtxRef.current = ctx;
+
+        // Ensure CORS is set on the audio element so Web Audio node is never tainted
+        if (audio.crossOrigin !== 'anonymous') {
+          const currentSrc = audio.src;
+          const prevTime = audio.currentTime;
+          const wasPlaying = !audio.paused;
+          audio.crossOrigin = 'anonymous';
+          if (currentSrc) {
+            audio.src = currentSrc;
+            if (prevTime) audio.currentTime = prevTime;
+            if (wasPlaying) audio.play().catch(() => {});
+          }
+        }
+
+        // 1. Bass boost node (Lowshelf at 80Hz)
+        const bassNode = ctx.createBiquadFilter();
+        bassNode.type = 'lowshelf';
+        bassNode.frequency.setValueAtTime(80, ctx.currentTime);
+        const initialBassGain = eqEnabledRef.current ? (bassBoostRef.current / 100) * 12 : 0;
+        bassNode.gain.setValueAtTime(initialBassGain, ctx.currentTime);
+        bassBoostNodeRef.current = bassNode;
+
+        // 2. 5-band EQ filters
+        const filterTypes = ['lowshelf', 'peaking', 'peaking', 'peaking', 'highshelf'];
+        const filters = EQ_FREQUENCIES.map((freq, idx) => {
+          const f = ctx.createBiquadFilter();
+          f.type = filterTypes[idx];
+          f.frequency.setValueAtTime(freq, ctx.currentTime);
+          f.Q.setValueAtTime(1.4, ctx.currentTime);
+          const gain = eqEnabledRef.current ? (eqBandsRef.current[idx] || 0) : 0;
+          f.gain.setValueAtTime(gain, ctx.currentTime);
+          return f;
+        });
+        filterNodesRef.current = filters;
+
+        // 3. Master gain node (volume & crossfade ramping)
+        const masterGain = ctx.createGain();
+        masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
+        masterGainNodeRef.current = masterGain;
+
+        // 4. Connect source safely
+        if (!sourceNodeRef.current) {
+          sourceNodeRef.current = ctx.createMediaElementSource(audio);
+        }
+
+        let curr = sourceNodeRef.current;
+        curr.connect(bassNode);
+        curr = bassNode;
+
+        for (const filter of filters) {
+          curr.connect(filter);
+          curr = filter;
+        }
+
+        curr.connect(masterGain);
+        masterGain.connect(ctx.destination);
+      }
+
+      // Resume AudioContext if suspended
+      if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+    } catch (err) {
+      console.warn('Web Audio Graph init error:', err?.message || err);
+    }
+  }, []);
+
+  const setEqBand = useCallback((bandIndex, value) => {
+    initAudioGraph();
+    setEqBandsState(prev => {
+      const next = [...prev];
+      next[bandIndex] = value;
+      try { localStorage.setItem('suno_eq_bands', JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+    setEqPresetState('Custom');
+    try { localStorage.setItem('suno_eq_preset', 'Custom'); } catch (_) {}
+
+    if (audioCtxRef.current) {
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+      if (filterNodesRef.current && filterNodesRef.current[bandIndex] && Number.isFinite(value)) {
+        const now = audioCtxRef.current.currentTime;
+        filterNodesRef.current[bandIndex].gain.setTargetAtTime(
+          eqEnabledRef.current ? value : 0,
+          now,
+          0.02
+        );
+      }
+    }
+  }, [initAudioGraph]);
+
+  const setEqPreset = useCallback((presetName) => {
+    initAudioGraph();
+    const preset = EQ_PRESETS[presetName];
+    if (!preset) return;
+
+    setEqPresetState(presetName);
+    try { localStorage.setItem('suno_eq_preset', presetName); } catch (_) {}
+
+    setEqBandsState(preset.bands);
+    try { localStorage.setItem('suno_eq_bands', JSON.stringify(preset.bands)); } catch (_) {}
+
+    setBassBoostState(preset.bassBoost);
+    try { localStorage.setItem('suno_bass_boost', preset.bassBoost.toString()); } catch (_) {}
+
+    if (audioCtxRef.current) {
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+      const now = audioCtxRef.current.currentTime;
+      if (filterNodesRef.current && filterNodesRef.current.length) {
+        filterNodesRef.current.forEach((filter, idx) => {
+          if (filter) {
+            filter.gain.setTargetAtTime(
+              eqEnabledRef.current ? (preset.bands[idx] || 0) : 0,
+              now,
+              0.02
+            );
+          }
+        });
+      }
+      if (bassBoostNodeRef.current) {
+        const bassGain = eqEnabledRef.current ? (preset.bassBoost / 100) * 12 : 0;
+        bassBoostNodeRef.current.gain.setTargetAtTime(bassGain, now, 0.02);
+      }
+    }
+  }, [initAudioGraph]);
+
+  const setBassBoost = useCallback((val) => {
+    initAudioGraph();
+    setBassBoostState(val);
+    try { localStorage.setItem('suno_bass_boost', val.toString()); } catch (_) {}
+    if (audioCtxRef.current) {
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+      if (bassBoostNodeRef.current && Number.isFinite(val)) {
+        const now = audioCtxRef.current.currentTime;
+        const gain = eqEnabledRef.current ? (val / 100) * 12 : 0;
+        bassBoostNodeRef.current.gain.setTargetAtTime(gain, now, 0.02);
+      }
+    }
+  }, [initAudioGraph]);
+
+  const toggleEq = useCallback((enabled) => {
+    initAudioGraph();
+    setEqEnabled(enabled);
+    try { localStorage.setItem('suno_eq_enabled', enabled ? 'true' : 'false'); } catch (_) {}
+
+    if (audioCtxRef.current) {
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+      const now = audioCtxRef.current.currentTime;
+      if (filterNodesRef.current && filterNodesRef.current.length) {
+        filterNodesRef.current.forEach((filter, idx) => {
+          if (filter) {
+            filter.gain.setTargetAtTime(
+              enabled ? (eqBandsRef.current[idx] || 0) : 0,
+              now,
+              0.02
+            );
+          }
+        });
+      }
+      if (bassBoostNodeRef.current) {
+        const bassGain = enabled ? (bassBoostRef.current / 100) * 12 : 0;
+        bassBoostNodeRef.current.gain.setTargetAtTime(bassGain, now, 0.02);
+      }
+    }
+  }, [initAudioGraph]);
+
+  const setCrossfadeDuration = useCallback((seconds) => {
+    const val = Number(seconds);
+    setCrossfadeDurationState(val);
+    try { localStorage.setItem('suno_crossfade_duration', val.toString()); } catch (_) {}
+  }, []);
 
   // Restore user-scoped state & track when logged-in user changes
   useEffect(() => {
@@ -403,7 +679,31 @@ export function MusicProvider({ children }) {
             duration: audio.duration
           });
 
+          // Reset crossfade flag at start of track
+          if (cTime < 2) {
+            crossfadeTriggeredRef.current = false;
+          }
+
+          const xfadeSec = crossfadeDurationRef.current || 0;
           if (
+            audio.duration > 8 &&
+            xfadeSec > 0 &&
+            cTime >= audio.duration - xfadeSec &&
+            !crossfadeTriggeredRef.current &&
+            !isAdvancingTrackRef.current &&
+            !audio.paused
+          ) {
+            crossfadeTriggeredRef.current = true;
+            // Smoothly ramp gain down for crossfade
+            if (audioCtxRef.current && masterGainNodeRef.current) {
+              masterGainNodeRef.current.gain.setTargetAtTime(
+                0.01,
+                audioCtxRef.current.currentTime,
+                xfadeSec / 3
+              );
+            }
+            handleSongEndedRef.current?.();
+          } else if (
             audio.duration > 5 &&
             cTime >= audio.duration - 0.35 &&
             !audio.paused &&
@@ -907,6 +1207,14 @@ export function MusicProvider({ children }) {
       }).catch(() => { });
     }
 
+    crossfadeTriggeredRef.current = false;
+    if (audioCtxRef.current && masterGainNodeRef.current) {
+      try {
+        masterGainNodeRef.current.gain.cancelScheduledValues(audioCtxRef.current.currentTime);
+        masterGainNodeRef.current.gain.setValueAtTime(1.0, audioCtxRef.current.currentTime);
+      } catch (_) {}
+    }
+
     if (activeSong.streamUrl) {
       // 1. Direct Lossless Studio 320k CDN Playback
       if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
@@ -915,6 +1223,10 @@ export function MusicProvider({ children }) {
       const targetVol = 1.0;
       try {
         const audio = audioRef.current;
+        if (audio) {
+          audio.crossOrigin = 'anonymous';
+        }
+        initAudioGraph();
 
         // Use the same-origin proxy first. Some browsers reject Saavn's
         // audio/mp4 CDN response even though the URL is otherwise valid.
@@ -952,6 +1264,9 @@ export function MusicProvider({ children }) {
         if (!options.proxyRetry) {
           try {
             const audio = audioRef.current;
+            if (audio) {
+              audio.crossOrigin = 'anonymous';
+            }
             const currentSrc = audio?.src || '';
             const isProxied = currentSrc.includes('/api/audio?url=');
             const retryUrl = isProxied ? activeSong.streamUrl : getProxiedAudioUrl(activeSong.streamUrl);
@@ -1099,6 +1414,10 @@ export function MusicProvider({ children }) {
         if (needsSetSrc) {
           playSong(activeTrack, queueRef.current, { isPlaylist: true, isQueueAdvance: true });
         } else {
+          initAudioGraph();
+          if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+            audioCtxRef.current.resume().catch(() => {});
+          }
           audio.volume = 1.0;
           audio.play()
             .then(() => {
@@ -1160,8 +1479,14 @@ export function MusicProvider({ children }) {
     const timerId = setInterval(() => {
       setSleepTimerRemaining(prev => {
         if (prev === null) return null;
+        // Smoothly fade out volume over the last 15 seconds
+        if (prev <= 15) {
+          const ratio = Math.max(0, (prev - 1) / 15);
+          if (audioRef.current) audioRef.current.volume = ratio * volume;
+        }
         if (prev <= 1) {
           pauseSong();
+          if (audioRef.current) audioRef.current.volume = volume; // Restore normal volume for next song
           setSleepTimerMode(null);
           setSelectedTimerOption(null);
           return null;
@@ -1498,7 +1823,22 @@ export function MusicProvider({ children }) {
       sleepTimerMode,
       selectedTimerOption,
       setTimerPreset,
-      getBackendBase
+      getBackendBase,
+      // 5-Band Equalizer & Bass Boost
+      eqEnabled,
+      toggleEq,
+      eqPreset,
+      setEqPreset,
+      eqBands,
+      setEqBand,
+      bassBoost,
+      setBassBoost,
+      EQ_PRESETS,
+      EQ_FREQUENCIES,
+      initAudioGraph,
+      // Crossfade & Audio Transitions
+      crossfadeDuration,
+      setCrossfadeDuration
     }}>
       {children}
     </MusicContext.Provider>
